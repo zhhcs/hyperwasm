@@ -52,9 +52,9 @@ pub struct CoSchedule<'a> {
 lazy_static! {
     static ref CO_TASK_0: CoTaskNode = CoTaskNode {
         node: LinkedList::new(),
-        co_id: unsafe { MaybeUninit::zeroed().assume_init() },
+        co_id: 0,
         co_ctx: unsafe { MaybeUninit::zeroed().assume_init() },
-        co_exit_ctx: todo!(),
+        co_exit_ctx: unsafe { MaybeUninit::zeroed().assume_init() },
         co_state: CoStateT::CoStateRunning,
         co_alloc_stack: unsafe { libc::malloc(128 * 1024) },
         exit_alloc_stack: unsafe { libc::malloc(4096) },
