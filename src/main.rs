@@ -1,3 +1,5 @@
+#![feature(naked_functions)]
+pub mod ctx;
 mod task;
 use may::coroutine;
 use std::{mem::MaybeUninit, ptr::null_mut, sync::Arc};
@@ -5,8 +7,8 @@ use task::CoSchedule;
 use tokio::task as tokio_task;
 use wasmtime::Linker;
 fn main() {
-
-    // main_thread_setup();
+    let co_sche = CoSchedule::sched_init();
+    main_thread_setup(&co_sche);
 }
 
 pub fn _co_main_exit() {
@@ -17,7 +19,7 @@ fn signal_handler() {
     // TODO!
 }
 
-fn main_thread_setup() {
+fn main_thread_setup(co_sche: &CoSchedule) {
     let mut action: libc::sigaction = unsafe { MaybeUninit::zeroed().assume_init() };
     action.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART;
     unsafe {
@@ -31,7 +33,18 @@ fn main_thread_setup() {
             null_mut(),
         )
     };
-    unsafe { libc::sched_yield() };
-    // unsafe { libc::setcontext() };
-    unsafe { libc::malloc(10) };
+
+    unsafe {
+        libc::setcontext(&co_sche.task_main.lock().unwrap().co_ctx as *const libc::ucontext_t)
+    };
+}
+
+fn co_run<F: FnOnce()>(mut co_sche: &CoSchedule, f: F) {
+    // unsafe {
+    //     libc::makecontext(
+    //         &mut co_sche.task_main.lock().unwrap().co_ctx,
+    //         f as extern "C" fn(),
+    //         1,
+    //     )
+    // };
 }
