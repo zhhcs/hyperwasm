@@ -1,5 +1,3 @@
-#![feature(naked_functions)]
-pub mod ctx;
 mod task;
 use may::coroutine;
 use std::{mem::MaybeUninit, ptr::null_mut, sync::Arc};
