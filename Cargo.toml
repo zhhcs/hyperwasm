@@ -8,6 +8,5 @@ edition = "2021"
 [dependencies]
 libc = "0.2"
 wasmtime = "1.0"
-may = "0.3"
-tokio = { version = "1.28", features = ["full"] }
 lazy_static = "1.4"
+nix = "0.26"

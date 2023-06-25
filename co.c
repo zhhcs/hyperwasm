@@ -73,7 +73,6 @@ void _co_main_exit() {
 
 void _co_signal_handler() {
     pthread_mutex_lock(&_co_sche.mutex);
-
     // 先一个一个找, 直到找到下一个
     _co_task_node_t* cur_task = _co_sche.cur_running_task;
     _co_task_node_t* iter_task = container_of(
@@ -124,7 +123,7 @@ void co_run(co_func_t func, void* arg) {
 
     pthread_mutex_init(&_co_sche.mutex, NULL);
     _co_sche.n_task_running = 1;
-    // id从2开始递增, 1以及被主协程使用
+    // id从2开始递增, 1已经被主协程使用
     _co_sche.id_inc = 2;
 
     void* main_stack = malloc(_CO_STACK_SIZE);
@@ -167,7 +166,7 @@ void co_run(co_func_t func, void* arg) {
     sigfillset(&set);
     pthread_attr_setsigmask_np(&attr, &set);
     pthread_create(&tid, &attr, _main_thread_setup, NULL);
-
+    printf("tid: %ld\n", tid);
     // 循环进行monitor
     int cur_running_co_id = 1;
     int slice_spent = 0;
