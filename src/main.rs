@@ -1,9 +1,16 @@
 use std::{
+    cell::Cell,
     mem, ptr,
     sync::atomic::{AtomicU32, Ordering},
+    thread::sleep,
+    time::Duration,
 };
 
 extern "C" {
+    fn pthread_attr_setsigmask_np(
+        attr: *mut libc::pthread_attr_t,
+        sigmask: *const libc::sigset_t,
+    ) -> libc::c_int;
     fn sigfillset(set: *mut libc::sigset_t) -> libc::c_int;
     fn sigdelset(set: *mut libc::sigset_t, signum: libc::c_int) -> libc::c_int;
     fn getcontext(ucp: *mut libc::ucontext_t) -> libc::c_int;
@@ -19,11 +26,16 @@ extern "C" {
 
 pub const CO_STACK_SIZE: usize = 128 * 1024;
 pub const CO_EXIT_STACK_SIZE: usize = 4096;
-pub static mut ID: AtomicU32 = AtomicU32::new(0);
+pub static mut ID: AtomicU32 = AtomicU32::new(1);
 pub static mut NUM_TASK_RUNNING: AtomicU32 = AtomicU32::new(0);
-pub static mut TASKS: Vec<Coroutine> = Vec::new();
+pub static mut RUNNINGS: Vec<Coroutine> = Vec::new();
 pub static mut EXITS: Vec<Coroutine> = Vec::new();
 pub const CO_NOTIFY_SIGNO: libc::c_int = libc::SIGURG;
+pub static mut COROUTINE: Cell<Option<ptr::NonNull<Coroutine>>> = Cell::new(None);
+
+// pub fn current() -> ptr::NonNull<Coroutine> {
+//     // unsafe { COROUTINE.with(|p| p.get()).expect("no running coroutine") }
+// }
 
 pub fn get_id() -> u32 {
     unsafe { ID.fetch_add(1, Ordering::SeqCst) }
@@ -124,16 +136,22 @@ pub struct Coroutine {
     f: Option<Box<dyn FnOnce()>>,
 }
 
+unsafe impl Sync for Coroutine {}
+
 impl Coroutine {
     pub fn new(f: Box<dyn FnOnce()>) -> Box<Coroutine> {
+        let id = get_id();
+        println!("creating coroutine ###### begin , id {}", id);
         let mut co = Box::new(Coroutine {
             f: Option::Some(f),
-            co_id: get_id(),
+            co_id: id,
             co_ctx: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             co_exit_ctx: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             co_state: CoState::CoStateRunning,
         });
         add_task();
+        let num = unsafe { NUM_TASK_RUNNING.load(Ordering::SeqCst) };
+        println!("NUM_TASKS: {}", num);
 
         let exit = Entry {
             f: Self::co_exit,
@@ -155,6 +173,7 @@ impl Coroutine {
             &mut co.co_ctx,
             *Context::new(&entry, Some(&mut co.co_exit_ctx), CO_STACK_SIZE),
         ));
+        println!("creating coroutine ###### end, id {}", id);
         co
     }
 
@@ -168,6 +187,7 @@ impl Coroutine {
 
     extern "C" fn main(arg: *mut libc::c_void) {
         let co = unsafe { &mut *(arg as *mut Coroutine) };
+        println!("co_id in extern main {}", co.get_co_id());
         co.run();
     }
 
@@ -183,8 +203,8 @@ impl Coroutine {
                 libc::exit(0);
             }
         }
-        let mut newmask: libc::sigset_t = unsafe { mem::MaybeUninit::zeroed().assume_init() };
-        let mut oldmask: libc::sigset_t = unsafe { mem::MaybeUninit::zeroed().assume_init() };
+        let mut newmask: libc::sigset_t = unsafe { std::mem::zeroed() };
+        let mut oldmask: libc::sigset_t = unsafe { std::mem::zeroed() };
         unsafe {
             sigfillset(&mut newmask);
             libc::pthread_sigmask(libc::SIG_SETMASK, &newmask, &mut oldmask);
@@ -210,10 +230,15 @@ pub static mut CO_SCHE: usize = 0;
 
 impl CoSchedule {
     pub fn new(f: Box<dyn FnOnce()>) -> Self {
+        println!("creating schedule");
+        let mut mutex = unsafe { mem::MaybeUninit::zeroed().assume_init() };
+        unsafe {
+            libc::pthread_mutex_init(&mut mutex, std::ptr::null());
+        }
         CoSchedule {
             task_main: *Coroutine::new(f),
-            cur_running_task: 0,
-            mutex: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+            cur_running_task: 1,
+            mutex,
         }
     }
 
@@ -225,8 +250,8 @@ impl CoSchedule {
     }
 
     pub fn spawn(&mut self, f: Box<dyn FnOnce()>) {
-        let mut newmask: libc::sigset_t = unsafe { mem::MaybeUninit::zeroed().assume_init() };
-        let mut oldmask: libc::sigset_t = unsafe { mem::MaybeUninit::zeroed().assume_init() };
+        let mut newmask: libc::sigset_t = unsafe { std::mem::zeroed() };
+        let mut oldmask: libc::sigset_t = unsafe { std::mem::zeroed() };
         unsafe {
             sigfillset(&mut newmask);
             libc::pthread_sigmask(libc::SIG_SETMASK, &newmask, &mut oldmask);
@@ -237,7 +262,8 @@ impl CoSchedule {
         let new_co = Coroutine::new(f);
 
         unsafe {
-            TASKS.push(*new_co);
+            RUNNINGS.push(*new_co);
+            println!("RUNNINGS: {}", RUNNINGS.len());
             libc::pthread_mutex_unlock(&mut self.mutex);
 
             libc::pthread_sigmask(libc::SIG_SETMASK, &oldmask, std::ptr::null_mut());
@@ -248,19 +274,72 @@ impl CoSchedule {
 pub fn run(f: Box<dyn FnOnce()>) {
     let mut co_sche = CoSchedule::new(f);
     co_sche.init();
-    unsafe { libc::pthread_mutex_init(&mut co_sche.mutex, std::ptr::null()) };
+    co_sche.cur_running_task = co_sche.task_main.get_co_id();
+    println!("task_main id = {}", co_sche.cur_running_task);
+    co_sche.spawn(Box::new(|| {
+        println!("TASK 1 STARTING");
+        let id = 1;
+        for _i in 0..30 {
+            let res = fib(28);
+            println!("#################task: {} res: {}", id, res);
+        }
+        println!("TASK 1 FINISHED");
+    }));
+    // co_sche.spawn(Box::new(|| {
+    //     println!("TASK 2 STARTING");
+    //     let id = 2;
+
+    //     for _i in 0..30 {
+    //         let res = fib(27);
+    //         println!("task: {} res: {}", id, res);
+    //     }
+
+    //     println!("TASK 2 FINISHED");
+    // }));
+
+    unsafe { COROUTINE = Cell::new(ptr::NonNull::new(&mut co_sche.task_main)) };
     let mut tid: libc::pthread_t = unsafe { mem::MaybeUninit::zeroed().assume_init() };
     let mut attr: libc::pthread_attr_t = unsafe { mem::MaybeUninit::zeroed().assume_init() };
 
     unsafe {
         libc::pthread_attr_init(&mut attr);
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        sigfillset(&mut set);
+        pthread_attr_setsigmask_np(&mut attr, &set);
         libc::pthread_create(&mut tid, &attr, main_thread_setup, core::ptr::null_mut())
     };
-    loop {}
+    let mut cur_running_co_id = 1;
+    let mut slice_spent = 0;
+    loop {
+        sleep(Duration::from_nanos(1_000_000));
+        unsafe {
+            libc::pthread_mutex_lock(&mut co_sche.mutex);
+            if NUM_TASK_RUNNING.load(Ordering::SeqCst) == 1 && co_sche.cur_running_task == 1 {
+                libc::pthread_mutex_unlock(&mut co_sche.mutex);
+                continue;
+            }
+
+            if cur_running_co_id != co_sche.cur_running_task {
+                cur_running_co_id = co_sche.cur_running_task;
+                slice_spent = 0;
+                libc::pthread_mutex_unlock(&mut co_sche.mutex);
+                continue;
+            }
+            slice_spent += 1;
+
+            if slice_spent > 5 {
+                let v: libc::sigval = libc::sigval {
+                    sival_ptr: 0 as *mut libc::c_void,
+                };
+                libc::pthread_sigqueue(tid, CO_NOTIFY_SIGNO, v);
+            }
+            libc::pthread_mutex_unlock(&mut co_sche.mutex);
+        };
+    }
 }
 
 // 在进入这个线程时, 它的所有信号都是屏蔽的
-extern "C" fn main_thread_setup(arg: *mut libc::c_void) -> *mut libc::c_void {
+extern "C" fn main_thread_setup(_arg: *mut libc::c_void) -> *mut libc::c_void {
     // 设置信号处理函数, 在信号处理函数中阻塞所有信号
     let mut action = libc::sigaction {
         sa_sigaction: co_signal_handler as libc::sighandler_t,
@@ -280,8 +359,34 @@ extern "C" fn main_thread_setup(arg: *mut libc::c_void) -> *mut libc::c_void {
 }
 
 fn co_signal_handler() {
-    // unsafe { libc::pthread_mutex_lock(&mutex) };
+    println!("co_signal_handler");
+    unsafe {
+        let co_sche = CO_SCHE as *mut CoSchedule;
+        libc::pthread_mutex_lock(&mut (*co_sche).mutex);
+
+        let old = COROUTINE.get().unwrap().as_mut();
+        let old_id = old.get_co_id();
+        println!("co_signal_handler current is co_id {}", old_id);
+        let curr = &mut RUNNINGS[(1) % RUNNINGS.len()];
+        let curr_id = curr.get_co_id();
+        println!("switch to coroutine {}", curr_id);
+        (*co_sche).cur_running_task = curr_id;
+        COROUTINE = Cell::new(ptr::NonNull::new(curr));
+        libc::pthread_mutex_unlock(&mut (*co_sche).mutex);
+        curr.co_ctx.switch(&mut old.co_ctx);
+    };
 }
+
 fn main() {
-    run(Box::new(move || println!("Hello world")));
+    run(Box::new(|| loop {}));
+}
+
+fn fib(num: i32) -> i32 {
+    if num == 0 {
+        return 1;
+    }
+    if num == 1 {
+        return 1;
+    }
+    fib(num - 1) + fib(num - 2)
 }

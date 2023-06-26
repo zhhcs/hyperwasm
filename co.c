@@ -269,6 +269,16 @@ void co_create(co_func_t func, void* arg) {
 // -----------------------
 // 上面是库函数
 
+void my_new_func3(void* p) {
+    int n = 1;
+    while (n < 60) {
+        if (n % 10 == 0) {
+            printf("my_new_func3 = %d\n", ff(n));
+        }
+        n++;
+    }
+}
+
 void my_new_func2(void* p) {
     int n = 1;
     while (n < 60) {
@@ -291,7 +301,8 @@ void my_new_func1(void* p) {
 
 void my_main_func(void* p) {
     co_create(my_new_func1, NULL);
-    co_create(my_new_func2, NULL);
+    co_create(my_new_func3, NULL);
+
     int n = 48;
     while (n > 0) {
         if (n % 2 == 0) {
@@ -314,4 +325,5 @@ int ff(int n) {
 
 int main() {
     co_run(my_main_func, NULL);
+    co_create(my_new_func2, NULL);
 }
