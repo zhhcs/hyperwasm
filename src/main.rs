@@ -23,6 +23,7 @@ fn main() {
         unsafe {
             libc::sigaction(libc::SIGURG, &sa, std::ptr::null_mut());
         }
+
         let co1 = Coroutine::new(
             Box::new(|| {
                 println!("Task 1 start");
