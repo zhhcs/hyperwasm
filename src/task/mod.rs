@@ -146,7 +146,7 @@ impl Coroutine {
     ///
     /// Returns whether this coroutine should be resumed again.
     pub fn resume(&mut self) -> bool {
-        println!("start resume");
+        // println!("start resume");
 
         let _scope = Scope::enter(self);
 
@@ -155,7 +155,7 @@ impl Coroutine {
     }
 
     pub fn suspend(&mut self) {
-        println!("start suspend");
+        // println!("start suspend");
         ThisThread::suspend(&mut self.context);
         if let Some(msg) = self.panicking {
             panic::panic_any(msg);

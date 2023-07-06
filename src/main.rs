@@ -28,12 +28,12 @@ fn main() {
             Box::new(|| {
                 println!("Task 1 start");
                 let id = 1;
+                let mut cnt = 36;
                 loop {
-                    for i in 30..40 {
-                        if i % 6 == 0 {
-                            let res = fib(i);
-                            println!("task: {} res: {}", id, res);
-                        }
+                    cnt += 1;
+                    if fib(cnt) > fib(35) {
+                        cnt -= 2;
+                        println!("this is task {}", id);
                     }
                 }
 
@@ -45,12 +45,12 @@ fn main() {
             Box::new(|| {
                 println!("Task 2 start");
                 let id = 2;
+                let mut cnt = 36;
                 loop {
-                    for i in 30..40 {
-                        if i % 5 == 0 {
-                            let res = fib(i);
-                            println!("task: {} res: {}", id, res);
-                        }
+                    cnt += 1;
+                    if fib(cnt) > fib(35) {
+                        cnt -= 2;
+                        println!("this is task {}", id);
                     }
                 }
 
@@ -62,13 +62,12 @@ fn main() {
             Box::new(|| {
                 println!("Task 3 start");
                 let id = 3;
-
+                let mut cnt = 36;
                 loop {
-                    for i in 28..40 {
-                        if i % 4 == 0 {
-                            let res = fib(i);
-                            println!("task: {} res: {}", id, res);
-                        }
+                    cnt += 1;
+                    if fib(cnt) > fib(35) {
+                        cnt -= 2;
+                        println!("this is task {}", id);
                     }
                 }
 
@@ -85,10 +84,10 @@ fn main() {
         tasks.push_back(std::ptr::NonNull::from(Box::leak(co2)));
         co3.resume();
         while current_is_none() {
-            cnt += 1;
-            if cnt % 10 == 0 {
-                println!("cnt : {}", cnt);
-            }
+            // cnt += 1;
+            // if cnt % 10 == 0 {
+            //     println!("cnt : {}", cnt);
+            // }
             let new = unsafe { tasks.pop_front().unwrap().as_mut() };
             new.resume();
         }
@@ -124,19 +123,19 @@ fn fib(num: i32) -> i32 {
 }
 
 fn signal_handler() {
-    println!("signal_handler");
+    // println!("signal_handler");
     let mut mask: libc::sigset_t = unsafe { std::mem::zeroed() };
     unsafe {
         libc::sigfillset(&mut mask);
         libc::sigprocmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
     }
     let tasks = unsafe { tasks().as_mut() };
-    println!("get tasks in signal handler");
+    // println!("get tasks in signal handler");
     // let new = unsafe { tasks.pop_front().unwrap().as_mut() };
     let old = unsafe { current().as_mut() };
     tasks.push_back(old.into());
 
-    println!("suspend and resume");
+    // println!("suspend and resume");
 
     old.suspend();
     // new.resume();
