@@ -1,5 +1,5 @@
 [package]
-name = "hyper-sched"
+name = "hyper-scheduler"
 version = "0.1.0"
 edition = "2021"
 
