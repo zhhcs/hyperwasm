@@ -77,7 +77,7 @@ impl Runtime {
 
         let tid = receiver.recv().unwrap();
         println!("tid = {}", tid);
-        thread::sleep(std::time::Duration::from_millis(1000));
+        thread::sleep(std::time::Duration::from_millis(100));
 
         loop {
             // 每隔100ms发送SIGURG信号给子线程
@@ -90,7 +90,7 @@ impl Runtime {
                 eprintln!("Failed to send signal to child thread");
             }
 
-            thread::sleep(std::time::Duration::from_millis(1000));
+            thread::sleep(std::time::Duration::from_millis(100));
         }
     }
 }
