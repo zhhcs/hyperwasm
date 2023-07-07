@@ -3,51 +3,38 @@ mod page_size;
 pub(crate) mod stack;
 
 use std::cell::{Cell, UnsafeCell};
-use std::collections::VecDeque;
 use std::panic;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{mem, ptr};
 
 use self::context::{Context, Entry};
 use self::stack::StackSize;
 
+pub static mut ID: AtomicUsize = AtomicUsize::new(1);
+
+fn get_id() -> usize {
+    unsafe { ID.fetch_add(1, Ordering::SeqCst) }
+}
+
 thread_local! {
     static COROUTINE: Cell<Option<ptr::NonNull<Coroutine>>> = Cell::new(None);
     static THREAD_CONTEXT: UnsafeCell<Context> = UnsafeCell::new(Context::empty());
-    static TASKS: Cell<Option<ptr::NonNull<VecDeque<ptr::NonNull<Coroutine>>>>> = Cell::new(None);
 }
 
-pub(crate) fn current() -> ptr::NonNull<Coroutine> {
-    COROUTINE.with(|p| p.get()).expect("no running coroutine")
+pub(crate) fn current() -> Option<ptr::NonNull<Coroutine>> {
+    COROUTINE.with(|cell| cell.get())
 }
 
 pub(crate) fn current_is_none() -> bool {
     COROUTINE.with(|cell| cell.get().is_none())
 }
 
-pub(crate) fn tasks() -> ptr::NonNull<VecDeque<ptr::NonNull<Coroutine>>> {
-    TASKS.with(|t| t.get()).expect("no running tasks")
-}
-
-pub(crate) struct TaskQueue {
-    tasks: VecDeque<ptr::NonNull<Coroutine>>,
-    co: Coroutine,
-}
-
-impl TaskQueue {
-    pub fn new(co: Coroutine) -> Self {
-        TaskQueue {
-            tasks: VecDeque::new(),
-            co,
-        }
-    }
-
-    pub fn init(&mut self) {
-        let co = ptr::NonNull::from(&self.co);
-        self.tasks.push_back(co);
-        let tasks = ptr::NonNull::from(&self.tasks);
-        TASKS.with(|t| t.set(Some(tasks)));
-    }
+pub enum CoStatus {
+    PENDING = 1,
+    RUNNING,
+    COMPLETED,
+    // TODO!
 }
 
 struct Scope {
@@ -101,12 +88,14 @@ impl ThisThread {
 
 pub(crate) struct Coroutine {
     context: Box<Context>,
-    completed: bool,
+    status: CoStatus,
     panicking: Option<&'static str>,
     f: Option<Box<dyn FnOnce()>>,
+    id: usize,
 }
 
 unsafe impl Sync for Coroutine {}
+unsafe impl Send for Coroutine {}
 
 impl Coroutine {
     pub fn new(f: Box<dyn FnOnce()>, stack_size: StackSize) -> Box<Coroutine> {
@@ -114,8 +103,9 @@ impl Coroutine {
         let mut co = Box::new(Coroutine {
             f: Option::Some(f),
             context: unsafe { mem::MaybeUninit::zeroed().assume_init() },
-            completed: false,
+            status: CoStatus::PENDING,
             panicking: None,
+            id: get_id(),
         });
         let entry = Entry {
             f: Self::main,
@@ -129,7 +119,7 @@ impl Coroutine {
     extern "C" fn main(arg: *mut libc::c_void) {
         let co = unsafe { &mut *(arg as *mut Coroutine) };
         co.run();
-        co.completed = true;
+        co.status = CoStatus::COMPLETED;
         ThisThread::restore();
     }
 
@@ -138,20 +128,22 @@ impl Coroutine {
         f();
     }
 
-    pub fn set_panic(&mut self, msg: &'static str) {
-        self.panicking = Some(msg);
-    }
+    // pub fn set_panic(&mut self, msg: &'static str) {
+    //     self.panicking = Some(msg);
+    // }
 
     /// Resumes coroutine.
-    ///
-    /// Returns whether this coroutine should be resumed again.
     pub fn resume(&mut self) -> bool {
         // println!("start resume");
 
         let _scope = Scope::enter(self);
 
         ThisThread::resume(&self.context);
-        !self.completed
+
+        match self.status {
+            CoStatus::COMPLETED => false,
+            _ => true,
+        }
     }
 
     pub fn suspend(&mut self) {
@@ -160,5 +152,9 @@ impl Coroutine {
         if let Some(msg) = self.panicking {
             panic::panic_any(msg);
         }
+    }
+
+    pub fn get_co_id(&self) -> usize {
+        self.id
     }
 }

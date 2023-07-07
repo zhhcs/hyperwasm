@@ -1,5 +1,5 @@
 [package]
-name = "hyper-scheduler"
+name = "hyper-sched"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2"
-wasmtime = "1.0"
-lazy_static = "1.4"
+lazy_static = "1.4.0"
 nix = "0.26"
+crossbeam = "0.8"
