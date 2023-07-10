@@ -47,7 +47,6 @@ impl Worker {
     }
 
     pub(crate) fn set_curr(&mut self) {
-        self.get_task();
         if current_is_none() {
             if let Some(co) = self.local_queue.pop_front() {
                 self.curr = Some(co);
@@ -55,10 +54,11 @@ impl Worker {
         }
     }
 
-    fn get_task(&mut self) {
-        while !self.is_full() && self.rt.queue_len() > 0 {
+    pub fn get_task(&mut self) {
+        if !self.is_full() && self.rt.queue_len() > 0 {
             if let Some(co) = self.rt.take() {
-                let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+                let mut co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+                unsafe { co.as_mut().init() };
                 self.local_queue.push_back(co);
                 self.len += 1;
             }
@@ -73,6 +73,8 @@ impl Worker {
         println!("thread spawned");
         loop {
             if current_is_none() {
+                self.get_task();
+
                 if let Some(mut co) = self.curr.take() {
                     let id = unsafe { co.as_mut().get_co_id() };
                     println!("co id = {} is ready to run", id);
@@ -91,7 +93,7 @@ impl Worker {
     }
 
     pub fn spawn(&mut self, f: Box<dyn FnOnce()>) {
-        let co = ptr::NonNull::from(Box::leak(Coroutine::new(f, StackSize::default())));
+        let co = ptr::NonNull::from(Box::leak(Coroutine::new(f, StackSize::default(), true)));
         self.local_queue.push_back(co);
         self.len += 1;
         println!("spawning coroutine");

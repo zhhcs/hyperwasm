@@ -92,13 +92,14 @@ pub(crate) struct Coroutine {
     panicking: Option<&'static str>,
     f: Option<Box<dyn FnOnce()>>,
     id: usize,
+    stack_size: StackSize,
 }
 
 unsafe impl Sync for Coroutine {}
 unsafe impl Send for Coroutine {}
 
 impl Coroutine {
-    pub fn new(f: Box<dyn FnOnce()>, stack_size: StackSize) -> Box<Coroutine> {
+    pub fn new(f: Box<dyn FnOnce()>, stack_size: StackSize, thread_local: bool) -> Box<Coroutine> {
         #[allow(invalid_value)]
         let mut co = Box::new(Coroutine {
             f: Option::Some(f),
@@ -106,14 +107,26 @@ impl Coroutine {
             status: CoStatus::PENDING,
             panicking: None,
             id: get_id(),
+            stack_size,
         });
+        if thread_local {
+            let entry = Entry {
+                f: Self::main,
+                arg: (co.as_mut() as *mut Coroutine) as *mut libc::c_void,
+                stack_size,
+            };
+            mem::forget(mem::replace(&mut co.context, Context::new(&entry, None)));
+        }
+        co
+    }
+
+    pub fn init(&mut self) {
         let entry = Entry {
             f: Self::main,
-            arg: (co.as_mut() as *mut Coroutine) as *mut libc::c_void,
-            stack_size,
+            arg: (self as *mut Coroutine) as *mut libc::c_void,
+            stack_size: self.stack_size,
         };
-        mem::forget(mem::replace(&mut co.context, Context::new(&entry, None)));
-        co
+        mem::forget(mem::replace(&mut self.context, Context::new(&entry, None)));
     }
 
     extern "C" fn main(arg: *mut libc::c_void) {

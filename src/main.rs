@@ -43,7 +43,6 @@ fn main() {
             }
         }
     }));
-    // FIXME!: 第1个task与最后一个有什么冲突
     rt.start();
 }
 

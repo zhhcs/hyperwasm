@@ -28,7 +28,7 @@ impl Runtime {
     }
 
     pub fn spawn(&self, f: Box<dyn FnOnce()>) {
-        let co = Coroutine::new(Box::new(move || f()), StackSize::default());
+        let co = Coroutine::new(Box::new(move || f()), StackSize::default(), false);
         if let Ok(mut q) = self.global_queue.try_lock() {
             q.push_back(co);
         }
@@ -58,7 +58,18 @@ impl Runtime {
             let w = Worker::new(self.clone(), 16);
             w.init();
             let w = unsafe { get_worker().as_mut() };
-
+            w.get_task();
+            // w.spawn(Box::new(move || {
+            //     println!("Local Task start");
+            //     let mut cnt = 36;
+            //     loop {
+            //         cnt += 1;
+            //         if crate::fib(cnt) > crate::fib(35) {
+            //             cnt -= 2;
+            //             println!("this is local task");
+            //         }
+            //     }
+            // }));
             let sa = libc::sigaction {
                 sa_sigaction: signal_handler as libc::sighandler_t,
                 sa_mask: unsafe { std::mem::zeroed() },
