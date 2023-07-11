@@ -16,14 +16,14 @@ use crate::{
 pub(crate) struct Runtime {
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
     // threadId: usize,
-    thread: Option<JoinHandle<()>>,
+    thread: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Runtime {
     pub fn new() -> Arc<Runtime> {
         Arc::new(Runtime {
             global_queue: Mutex::new(VecDeque::new()),
-            thread: None,
+            thread: Mutex::new(Vec::new()),
         })
     }
 
@@ -54,8 +54,9 @@ impl Runtime {
 
     pub fn start(self: Arc<Runtime>) {
         let (sender, receiver) = std::sync::mpsc::channel();
-        let _t = thread::spawn(move || {
-            let w = Worker::new(self.clone(), 16);
+        let rt = self.clone();
+        let t = thread::spawn(move || {
+            let w = Worker::new(rt, 16);
             w.init();
             let w = unsafe { get_worker().as_mut() };
             w.get_task();
@@ -88,28 +89,32 @@ impl Runtime {
 
         let tid = receiver.recv().unwrap();
         println!("tid = {}", tid);
-        thread::sleep(std::time::Duration::from_millis(100));
-
-        loop {
-            // 每隔100ms发送SIGURG信号给子线程
-            let sigval = libc::sigval {
-                sival_ptr: 0 as *mut libc::c_void,
-            };
-            let ret = unsafe { libc::pthread_sigqueue(tid, libc::SIGURG, sigval) };
-
-            if ret != 0 {
-                eprintln!("Failed to send signal to child thread");
-            }
-
+        let timer = thread::spawn(move || {
             thread::sleep(std::time::Duration::from_millis(100));
-        }
+            loop {
+                // 每隔100ms发送SIGURG信号给子线程
+                let sigval = libc::sigval {
+                    sival_ptr: 0 as *mut libc::c_void,
+                };
+                let ret = unsafe { libc::pthread_sigqueue(tid, libc::SIGURG, sigval) };
+
+                if ret != 0 {
+                    eprintln!("Failed to send signal to child thread");
+                }
+
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
     }
 }
 
 impl Drop for Runtime {
     fn drop(&mut self) {
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
+        println!("Dropping runtime");
+        if let Ok(t) = self.thread.try_lock().as_mut() {
+            while let Some(t) = t.pop() {
+                t.join().unwrap();
+            }
         }
     }
 }

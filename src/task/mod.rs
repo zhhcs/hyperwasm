@@ -6,6 +6,7 @@ use std::cell::{Cell, UnsafeCell};
 use std::panic;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 use std::{mem, ptr};
 
 use self::context::{Context, Entry};
@@ -30,9 +31,12 @@ pub(crate) fn current_is_none() -> bool {
     COROUTINE.with(|cell| cell.get().is_none())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CoStatus {
     PENDING = 1,
+    READY,
     RUNNING,
+    SUSPENDED,
     COMPLETED,
     // TODO!
 }
@@ -86,6 +90,20 @@ impl ThisThread {
     }
 }
 
+struct SchedulerStatus {
+    tick: u32,
+    create_time: Instant,
+}
+
+impl SchedulerStatus {
+    pub fn new() -> SchedulerStatus {
+        SchedulerStatus {
+            tick: 0,
+            create_time: Instant::now(),
+        }
+    }
+}
+
 pub(crate) struct Coroutine {
     context: Box<Context>,
     status: CoStatus,
@@ -93,6 +111,7 @@ pub(crate) struct Coroutine {
     f: Option<Box<dyn FnOnce()>>,
     id: usize,
     stack_size: StackSize,
+    schedule_status: SchedulerStatus,
 }
 
 unsafe impl Sync for Coroutine {}
@@ -108,6 +127,7 @@ impl Coroutine {
             panicking: None,
             id: get_id(),
             stack_size,
+            schedule_status: SchedulerStatus::new(),
         });
         if thread_local {
             let entry = Entry {
@@ -116,8 +136,17 @@ impl Coroutine {
                 stack_size,
             };
             mem::forget(mem::replace(&mut co.context, Context::new(&entry, None)));
+            co.status = CoStatus::READY;
         }
         co
+    }
+
+    pub(crate) fn set_status(&mut self, status: CoStatus) {
+        self.status = status;
+    }
+
+    pub fn get_status(&self) -> CoStatus {
+        self.status
     }
 
     pub fn init(&mut self) {
@@ -127,6 +156,7 @@ impl Coroutine {
             stack_size: self.stack_size,
         };
         mem::forget(mem::replace(&mut self.context, Context::new(&entry, None)));
+        self.set_status(CoStatus::READY);
     }
 
     extern "C" fn main(arg: *mut libc::c_void) {
@@ -155,7 +185,10 @@ impl Coroutine {
 
         match self.status {
             CoStatus::COMPLETED => false,
-            _ => true,
+            _ => {
+                self.set_status(CoStatus::RUNNING);
+                true
+            }
         }
     }
 

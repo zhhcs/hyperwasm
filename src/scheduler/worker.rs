@@ -5,7 +5,7 @@ pub(crate) type ArrayQueue<T> = VecDeque<T>;
 
 use crate::{
     runtime::Runtime,
-    task::{current, current_is_none, Coroutine},
+    task::{current, current_is_none, CoStatus, Coroutine},
     StackSize,
 };
 
@@ -18,7 +18,9 @@ pub(crate) fn get_worker() -> ptr::NonNull<Worker> {
 }
 
 pub(crate) struct Worker {
+    new_spawned: ArrayQueue<Box<Coroutine>>,
     local_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
+    suspend_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
     rt: Arc<Runtime>,
     curr: Option<ptr::NonNull<Coroutine>>,
     capacity: usize,
@@ -31,9 +33,13 @@ unsafe impl Sync for Worker {}
 
 impl Worker {
     pub fn new(rt: Arc<Runtime>, capacity: usize) -> Arc<Worker> {
+        let new_spawned = ArrayQueue::with_capacity(capacity);
         let local_queue = ArrayQueue::with_capacity(capacity);
+        let suspend_queue = ArrayQueue::with_capacity(capacity);
         Arc::new(Worker {
+            new_spawned,
             local_queue,
+            suspend_queue,
             rt,
             curr: None,
             capacity,
@@ -50,16 +56,21 @@ impl Worker {
         if current_is_none() {
             if let Some(co) = self.local_queue.pop_front() {
                 self.curr = Some(co);
+            } else if let Some(co) = self.new_spawned.pop_front() {
+                let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+                self.curr = Some(co);
+            } else if let Some(co) = self.suspend_queue.pop_front() {
+                self.curr = Some(co);
             }
         }
     }
 
     pub fn get_task(&mut self) {
-        if !self.is_full() && self.rt.queue_len() > 0 {
+        while !self.is_full() && self.rt.queue_len() > 0 {
             if let Some(co) = self.rt.take() {
-                let mut co = ptr::NonNull::from(Box::leak(Box::new(*co)));
-                unsafe { co.as_mut().init() };
-                self.local_queue.push_back(co);
+                // let mut co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+                // unsafe { co.as_mut().init() };
+                self.new_spawned.push_back(co);
                 self.len += 1;
             }
         }
@@ -73,12 +84,14 @@ impl Worker {
         println!("thread spawned");
         loop {
             if current_is_none() {
-                self.get_task();
-
                 if let Some(mut co) = self.curr.take() {
-                    let id = unsafe { co.as_mut().get_co_id() };
-                    println!("co id = {} is ready to run", id);
-                    self.run_co(co);
+                    let co = unsafe { co.as_mut() };
+                    if co.get_status() == CoStatus::PENDING {
+                        co.init();
+                    }
+                    // let id = co.get_co_id();
+                    // println!("co id = {} is ready to run", id);
+                    self.run_co(co.into());
                 }
             }
         }
@@ -87,14 +100,17 @@ impl Worker {
     pub(crate) fn suspend(&mut self) {
         if let Some(mut curr) = current() {
             let curr = unsafe { curr.as_mut() };
-            self.local_queue.push_back(curr.into());
+            if curr.get_status() != CoStatus::COMPLETED {
+                curr.set_status(CoStatus::SUSPENDED);
+            }
+            self.suspend_queue.push_back(curr.into());
             curr.suspend();
         }
     }
 
     pub fn spawn(&mut self, f: Box<dyn FnOnce()>) {
-        let co = ptr::NonNull::from(Box::leak(Coroutine::new(f, StackSize::default(), true)));
-        self.local_queue.push_back(co);
+        let co = Coroutine::new(f, StackSize::default(), false);
+        self.new_spawned.push_back(co);
         self.len += 1;
         println!("spawning coroutine");
     }
@@ -104,6 +120,7 @@ impl Worker {
         if unsafe { co.as_mut().resume() } {
             return;
         }
+        self.len -= 1;
         Self::drop_coroutine(co);
     }
 

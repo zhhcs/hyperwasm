@@ -14,6 +14,8 @@ pub(crate) fn signal_handler() {
     let worker = unsafe { get_worker().as_mut() };
     // println!("suspend and resume");
     worker.suspend();
+    worker.get_task();
+
     worker.set_curr();
 
     // println!("########### end of signal handler ##########");
