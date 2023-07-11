@@ -1,13 +1,16 @@
 use std::{cell::Cell, collections::VecDeque, ptr, sync::Arc};
 
 // use crossbeam::queue::ArrayQueue;
+// crossbeam = "0.8"
+
 pub(crate) type ArrayQueue<T> = VecDeque<T>;
 
 use crate::{
-    runtime::Runtime,
     task::{current, current_is_none, CoStatus, Coroutine},
     StackSize,
 };
+
+use super::Scheduler;
 
 thread_local! {
     static WORKER: Cell<Option<ptr::NonNull<Worker>>> = Cell::new(None);
@@ -21,7 +24,7 @@ pub(crate) struct Worker {
     new_spawned: ArrayQueue<Box<Coroutine>>,
     local_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
     suspend_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
-    rt: Arc<Runtime>,
+    scheduler: Arc<Scheduler>,
     curr: Option<ptr::NonNull<Coroutine>>,
     capacity: usize,
     len: usize,
@@ -32,7 +35,7 @@ unsafe impl Send for Worker {}
 unsafe impl Sync for Worker {}
 
 impl Worker {
-    pub fn new(rt: Arc<Runtime>, capacity: usize) -> Arc<Worker> {
+    pub(crate) fn new(scheduler: &Arc<Scheduler>, capacity: usize) -> Arc<Worker> {
         let new_spawned = ArrayQueue::with_capacity(capacity);
         let local_queue = ArrayQueue::with_capacity(capacity);
         let suspend_queue = ArrayQueue::with_capacity(capacity);
@@ -40,7 +43,7 @@ impl Worker {
             new_spawned,
             local_queue,
             suspend_queue,
-            rt,
+            scheduler: scheduler.clone(),
             curr: None,
             capacity,
             len: 0,
@@ -65,11 +68,10 @@ impl Worker {
         }
     }
 
-    pub fn get_task(&mut self) {
-        while !self.is_full() && self.rt.queue_len() > 0 {
-            if let Some(co) = self.rt.take() {
-                // let mut co = ptr::NonNull::from(Box::leak(Box::new(*co)));
-                // unsafe { co.as_mut().init() };
+    pub(crate) fn get_task(&mut self) {
+        while !self.is_full() && self.scheduler.get_length() > 0 {
+            if let Some(co) = self.scheduler.pop() {
+                println!("get coroutine co id = {} from global queue", co.get_co_id());
                 self.new_spawned.push_back(co);
                 self.len += 1;
             }
@@ -80,8 +82,7 @@ impl Worker {
         self.len >= self.capacity
     }
 
-    pub(crate) fn sched(&mut self) {
-        println!("thread spawned");
+    pub(crate) fn run(&mut self) {
         loop {
             if current_is_none() {
                 if let Some(mut co) = self.curr.take() {
@@ -108,11 +109,12 @@ impl Worker {
         }
     }
 
-    pub fn spawn(&mut self, f: Box<dyn FnOnce()>) {
-        let co = Coroutine::new(f, StackSize::default(), false);
-        self.new_spawned.push_back(co);
+    pub fn spawn_local(&mut self, f: Box<dyn FnOnce()>) {
+        let co = Coroutine::new(f, StackSize::default(), true);
+        let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+        self.local_queue.push_back(co);
         self.len += 1;
-        println!("spawning coroutine");
+        println!("spawning local coroutine");
     }
 
     fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>) {

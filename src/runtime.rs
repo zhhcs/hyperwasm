@@ -1,120 +1,29 @@
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-    thread::{self, JoinHandle},
-};
+use std::{sync::Arc, thread::JoinHandle};
 
-use crate::{
-    scheduler::{
-        signal_handler,
-        worker::{get_worker, Worker},
-    },
-    task::Coroutine,
-    StackSize,
-};
+use crate::{scheduler::Scheduler, task::Coroutine, StackSize};
 
 pub(crate) struct Runtime {
-    global_queue: Mutex<VecDeque<Box<Coroutine>>>,
-    // threadId: usize,
-    thread: Mutex<Vec<JoinHandle<()>>>,
+    scheduler: Arc<Scheduler>,
+    threads: Vec<JoinHandle<()>>,
 }
 
 impl Runtime {
-    pub fn new() -> Arc<Runtime> {
-        Arc::new(Runtime {
-            global_queue: Mutex::new(VecDeque::new()),
-            thread: Mutex::new(Vec::new()),
-        })
+    pub fn new() -> Runtime {
+        let scheduler = Scheduler::new();
+        let threads = Scheduler::start(&scheduler);
+        Runtime { scheduler, threads }
     }
 
-    pub fn spawn(&self, f: Box<dyn FnOnce()>) {
+    pub fn spawn(&self, f: Box<dyn FnOnce()>) -> Result<(), std::io::Error> {
         let co = Coroutine::new(Box::new(move || f()), StackSize::default(), false);
-        if let Ok(mut q) = self.global_queue.try_lock() {
-            q.push_back(co);
-        }
-    }
-
-    pub fn queue_len(&self) -> usize {
-        if let Ok(q) = self.global_queue.try_lock().as_mut() {
-            return q.len();
-        }
-        0
-    }
-
-    pub fn take(&self) -> Option<Box<Coroutine>> {
-        if let Ok(q) = self.global_queue.try_lock().as_mut() {
-            let co = q.pop_front();
-            if let Some(co) = co {
-                println!("take coroutine id = {} from global queue", co.get_co_id());
-                return Some(co);
-            }
-        }
-        None
-    }
-
-    pub fn start(self: Arc<Runtime>) {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let rt = self.clone();
-        let t = thread::spawn(move || {
-            let w = Worker::new(rt, 16);
-            w.init();
-            let w = unsafe { get_worker().as_mut() };
-            w.get_task();
-            // w.spawn(Box::new(move || {
-            //     println!("Local Task start");
-            //     let mut cnt = 36;
-            //     loop {
-            //         cnt += 1;
-            //         if crate::fib(cnt) > crate::fib(35) {
-            //             cnt -= 2;
-            //             println!("this is local task");
-            //         }
-            //     }
-            // }));
-            let sa = libc::sigaction {
-                sa_sigaction: signal_handler as libc::sighandler_t,
-                sa_mask: unsafe { std::mem::zeroed() },
-                sa_flags: libc::SA_SIGINFO | libc::SA_RESTART,
-                sa_restorer: None,
-            };
-
-            unsafe {
-                libc::sigaction(libc::SIGURG, &sa, std::ptr::null_mut());
-            }
-
-            let tid = nix::sys::pthread::pthread_self();
-            sender.send(tid).unwrap();
-            w.sched();
-        });
-
-        let tid = receiver.recv().unwrap();
-        println!("tid = {}", tid);
-        let timer = thread::spawn(move || {
-            thread::sleep(std::time::Duration::from_millis(100));
-            loop {
-                // 每隔100ms发送SIGURG信号给子线程
-                let sigval = libc::sigval {
-                    sival_ptr: 0 as *mut libc::c_void,
-                };
-                let ret = unsafe { libc::pthread_sigqueue(tid, libc::SIGURG, sigval) };
-
-                if ret != 0 {
-                    eprintln!("Failed to send signal to child thread");
-                }
-
-                thread::sleep(std::time::Duration::from_millis(100));
-            }
-        });
+        self.scheduler.push(co)
     }
 }
 
 impl Drop for Runtime {
     fn drop(&mut self) {
-        println!("Dropping runtime");
-        if let Ok(t) = self.thread.try_lock().as_mut() {
-            while let Some(t) = t.pop() {
-                t.join().unwrap();
-            }
+        while let Some(t) = self.threads.pop() {
+            t.join().unwrap();
         }
     }
 }

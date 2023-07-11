@@ -118,7 +118,11 @@ unsafe impl Sync for Coroutine {}
 unsafe impl Send for Coroutine {}
 
 impl Coroutine {
-    pub fn new(f: Box<dyn FnOnce()>, stack_size: StackSize, thread_local: bool) -> Box<Coroutine> {
+    pub(crate) fn new(
+        f: Box<dyn FnOnce()>,
+        stack_size: StackSize,
+        thread_local: bool,
+    ) -> Box<Coroutine> {
         #[allow(invalid_value)]
         let mut co = Box::new(Coroutine {
             f: Option::Some(f),
