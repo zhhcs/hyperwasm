@@ -71,7 +71,7 @@ impl Worker {
     pub(crate) fn get_task(&mut self) {
         while !self.is_full() && self.scheduler.get_length() > 0 {
             if let Some(co) = self.scheduler.pop() {
-                println!("get coroutine co id = {} from global queue", co.get_co_id());
+                // println!("get coroutine co id = {} from global queue", co.get_co_id());
                 self.new_spawned.push_back(co);
                 self.len += 1;
             }
