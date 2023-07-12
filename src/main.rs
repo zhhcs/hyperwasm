@@ -16,17 +16,7 @@ fn main() {
     for i in 1..10 {
         rt.spawn(Box::new(move || {
             let i = i.clone();
-            println!("Task {} start", i);
-            let mut num = 35;
-            for index in 0..i % 5 {
-                num += index;
-                let res = fib(num);
-                if res > fib(35) {
-                    num -= 2;
-                    // println!("this is task {}, res = {}", i, res % fib(i));
-                }
-            }
-            println!("Task {} end", i);
+            do_something(i);
         }))
         .unwrap();
         // println!("Task {} spawned", i);
@@ -41,6 +31,20 @@ fn fib(num: i32) -> i32 {
         return 1;
     }
     fib(num - 1) + fib(num - 2)
+}
+
+fn do_something(i: i32) {
+    println!("Task {} start", i);
+    let mut num = 35;
+    for index in 0..i % 5 {
+        num += index;
+        let res = fib(num);
+        if res > fib(35) {
+            num -= 2;
+            // println!("this is task {}, res = {}", i, res % fib(i));
+        }
+    }
+    println!("Task {} end", i);
 }
 
 use nix::sys::signal::{self, SigEvent, SigHandler, SigevNotify, Signal};
