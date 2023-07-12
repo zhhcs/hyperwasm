@@ -41,7 +41,7 @@ fn do_something(i: i32) {
         let res = fib(num);
         if res > fib(35) {
             num -= 2;
-            // println!("this is task {}, res = {}", i, res % fib(i));
+            println!("this is task {}, res = {}", i, res % fib(i));
         }
     }
     println!("Task {} end", i);
