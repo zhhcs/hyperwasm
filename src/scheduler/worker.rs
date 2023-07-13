@@ -10,7 +10,7 @@ use crate::{
     StackSize,
 };
 
-use super::Scheduler;
+use super::{get_timer, Scheduler};
 
 thread_local! {
     static WORKER: Cell<Option<ptr::NonNull<Worker>>> = Cell::new(None);
@@ -27,7 +27,7 @@ pub(crate) struct Worker {
     scheduler: Arc<Scheduler>,
     curr: Option<ptr::NonNull<Coroutine>>,
     capacity: usize,
-    len: usize,
+    pub len: usize,
     // signal
 }
 
@@ -127,7 +127,8 @@ impl Worker {
     }
 
     fn drop_coroutine(co: ptr::NonNull<Coroutine>) {
-        println!("dropping coroutine");
+        // println!("dropping coroutine");
         drop(unsafe { Box::from_raw(co.as_ptr()) });
+        unsafe { get_timer().as_mut().reset_timer() };
     }
 }

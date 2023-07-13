@@ -1,22 +1,80 @@
-use std::{
-    collections::VecDeque,
-    sync::{
-        atomic::{AtomicI32, Ordering},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
-};
-
-use nix::unistd::gettid;
-
 use crate::{
     scheduler::worker::{get_worker, Worker},
     task::Coroutine,
 };
+use nix::{
+    sys::{
+        signal::{self, SigEvent, SigHandler, SigevNotify, Signal},
+        timer::Timer,
+        timer::{Expiration, TimerSetTimeFlags},
+    },
+    time::ClockId,
+    unistd::gettid,
+};
+use std::{
+    cell::Cell,
+    collections::VecDeque,
+    convert::TryFrom,
+    ptr,
+    sync::{Arc, Mutex},
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 
+const SIG: Signal = Signal::SIGURG;
 pub mod worker;
 
-pub static mut TID: AtomicI32 = AtomicI32::new(0);
+thread_local! {
+    static TIMER: Cell<Option<ptr::NonNull<LocalTimer>>> = Cell::new(None);
+}
+
+fn get_timer() -> ptr::NonNull<LocalTimer> {
+    TIMER.with(|cell| cell.get()).expect("no timer")
+}
+
+struct LocalTimer {
+    timer: Timer,
+    expiration: Expiration,
+}
+
+impl LocalTimer {
+    fn new(thread_id: i32, expiration: u64) -> LocalTimer {
+        // let thread_id = get_thread_id();
+        let expiration = Expiration::Interval(Duration::from_millis(expiration).into());
+        let timer = Self::set_timer(thread_id, expiration);
+        LocalTimer { timer, expiration }
+    }
+
+    fn init(&self) {
+        let timer = ptr::NonNull::from(self);
+        TIMER.with(|t| t.set(Some(timer)));
+    }
+
+    fn set_timer(tid: i32, expiration: Expiration) -> Timer {
+        let clockid = ClockId::CLOCK_MONOTONIC;
+        let sigevent = SigEvent::new(SigevNotify::SigevThreadId {
+            signal: SIG,
+            si_value: 0,
+            thread_id: tid,
+        });
+
+        let mut timer = Timer::new(clockid, sigevent).unwrap();
+        let flags = TimerSetTimeFlags::empty();
+        timer.set(expiration, flags).expect("could not set timer");
+
+        let handler = SigHandler::Handler(signal_handler);
+        unsafe { signal::signal(SIG, handler) }.unwrap();
+        timer
+    }
+
+    pub(crate) fn reset_timer(&mut self) {
+        let flags = TimerSetTimeFlags::empty();
+        self.timer
+            .set(self.expiration, flags)
+            .expect("could not set timer");
+        // println!("reset timer");
+    }
+}
 
 pub(crate) struct Scheduler {
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
@@ -35,12 +93,13 @@ impl Scheduler {
     pub(crate) fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
         let scheduler = self.clone();
         let t = thread::spawn(move || {
-            let w = Worker::new(&scheduler, 16);
+            let w = Worker::new(&scheduler, 4);
             w.init();
             let w = unsafe { get_worker().as_mut() };
 
-            let tid0 = gettid().into();
-            let _ = unsafe { TID.compare_exchange(0, tid0, Ordering::Acquire, Ordering::Relaxed) };
+            let tid = gettid().into();
+            let timer = LocalTimer::new(tid, 10);
+            timer.init();
 
             w.run();
         });
@@ -79,25 +138,26 @@ impl Scheduler {
     }
 }
 
-pub(crate) fn signal_handler() {
-    // println!("signal_handler");
-    let mut mask: libc::sigset_t = unsafe { std::mem::zeroed() };
-    unsafe {
-        libc::sigfillset(&mut mask);
-        libc::sigprocmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
-    }
-    // println!("get local queue in signal handler");
+extern "C" fn signal_handler(signal: libc::c_int) {
+    // println!("now {:?}", std::time::Instant::now());
+    let signal = Signal::try_from(signal).unwrap();
+    if signal == SIG {
+        let mut mask: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigfillset(&mut mask);
+            libc::sigprocmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
+        }
 
-    let worker = unsafe { get_worker().as_mut() };
-    // println!("suspend and resume");
-    worker.suspend();
-    worker.get_task();
+        let worker = unsafe { get_worker().as_mut() };
+        worker.suspend();
+        worker.get_task();
+        worker.set_curr();
 
-    worker.set_curr();
+        unsafe { get_timer().as_mut() }.reset_timer();
 
-    // println!("########### end of signal handler ##########");
-    unsafe {
-        libc::sigemptyset(&mut mask);
-        libc::sigprocmask(libc::SIG_UNBLOCK, &mask, std::ptr::null_mut());
+        unsafe {
+            libc::sigemptyset(&mut mask);
+            libc::sigprocmask(libc::SIG_UNBLOCK, &mask, std::ptr::null_mut());
+        }
     }
 }
