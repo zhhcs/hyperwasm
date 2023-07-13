@@ -1,4 +1,5 @@
 use crate::{
+    cgroupv2,
     scheduler::worker::{get_worker, Worker},
     task::Coroutine,
 };
@@ -91,14 +92,16 @@ impl Scheduler {
     }
 
     pub(crate) fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
+        Self::create_cg();
         let scheduler = self.clone();
         let t = thread::spawn(move || {
             let w = Worker::new(&scheduler, 4);
+            let tid = gettid();
+            w.set_cgroup(tid);
             w.init();
             let w = unsafe { get_worker().as_mut() };
 
-            let tid = gettid().into();
-            let timer = LocalTimer::new(tid, 10);
+            let timer = LocalTimer::new(tid.into(), 10);
             timer.init();
 
             w.run();
@@ -107,6 +110,30 @@ impl Scheduler {
         let mut v = Vec::new();
         v.push(t);
         v
+    }
+
+    fn create_cg() {
+        let hypersched = cgroupv2::Controllerv2::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            String::from("hypersched"),
+        );
+        hypersched.set_sub_controller(
+            vec![
+                cgroupv2::ControllerType::CPU,
+                cgroupv2::ControllerType::CPUSET,
+            ],
+            None,
+        );
+        hypersched.set_cpuset(0, Some(1));
+        hypersched.set_cgroup_procs(nix::unistd::gettid());
+
+        let cgmain = cgroupv2::Controllerv2::new(
+            std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+            String::from("main"),
+        );
+        cgmain.set_threaded();
+        cgmain.set_cpuset(0, None);
+        cgmain.set_cgroup_threads(nix::unistd::gettid());
     }
 
     pub(crate) fn push(&self, co: Box<Coroutine>) -> Result<(), std::io::Error> {

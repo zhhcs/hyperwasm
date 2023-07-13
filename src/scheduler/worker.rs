@@ -5,6 +5,8 @@ use std::{cell::Cell, collections::VecDeque, ptr, sync::Arc};
 
 pub(crate) type ArrayQueue<T> = VecDeque<T>;
 
+use nix::unistd::Pid;
+
 use crate::{
     task::{current, current_is_none, CoStatus, Coroutine},
     StackSize,
@@ -53,6 +55,16 @@ impl Worker {
     pub(crate) fn init(&self) {
         let worker = ptr::NonNull::from(self);
         WORKER.with(|t| t.set(Some(worker)));
+    }
+
+    pub(crate) fn set_cgroup(&self, tid: Pid) {
+        let cgworker = crate::cgroupv2::Controllerv2::new(
+            std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+            String::from("worker"),
+        );
+        cgworker.set_threaded();
+        cgworker.set_cpuset(1, None);
+        cgworker.set_cgroup_threads(tid);
     }
 
     pub(crate) fn set_curr(&mut self) {

@@ -1,3 +1,4 @@
+pub mod cgroupv2;
 pub mod runtime;
 pub mod scheduler;
 pub mod task;
@@ -26,7 +27,7 @@ fn main() {
         .unwrap();
     }
 
-    std::thread::sleep(std::time::Duration::from_millis(10000));
+    std::thread::sleep(std::time::Duration::from_millis(10_000));
     assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);
     exit(0);
 }
