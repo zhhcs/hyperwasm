@@ -22,8 +22,8 @@ use std::{
     time::Duration,
 };
 
+pub(crate) mod worker;
 const SIG: Signal = Signal::SIGURG;
-pub mod worker;
 
 thread_local! {
     static TIMER: Cell<Option<ptr::NonNull<LocalTimer>>> = Cell::new(None);
@@ -101,6 +101,7 @@ impl Scheduler {
             w.init();
             let w = unsafe { get_worker().as_mut() };
 
+            // 设置线程定时器
             let timer = LocalTimer::new(tid.into(), 10);
             timer.init();
 
@@ -127,13 +128,13 @@ impl Scheduler {
         hypersched.set_cpuset(0, Some(1));
         hypersched.set_cgroup_procs(nix::unistd::gettid());
 
-        let cgmain = cgroupv2::Controllerv2::new(
+        let cg_main = cgroupv2::Controllerv2::new(
             std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
             String::from("main"),
         );
-        cgmain.set_threaded();
-        cgmain.set_cpuset(0, None);
-        cgmain.set_cgroup_threads(nix::unistd::gettid());
+        cg_main.set_threaded();
+        cg_main.set_cpuset(0, None);
+        cg_main.set_cgroup_threads(nix::unistd::gettid());
     }
 
     pub(crate) fn push(&self, co: Box<Coroutine>) -> Result<(), std::io::Error> {

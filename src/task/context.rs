@@ -1,6 +1,5 @@
-use std::{mem, ptr};
-
 use super::stack::{Stack, StackSize};
+use std::{mem, ptr};
 
 extern "C" {
     fn getcontext(ucp: *mut libc::ucontext_t) -> libc::c_int;

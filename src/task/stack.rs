@@ -1,6 +1,5 @@
-use std::alloc;
-
 use super::page_size;
+use std::alloc;
 
 /// StackSize specifies desired stack size for new task.
 ///

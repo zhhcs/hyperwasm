@@ -1,16 +1,13 @@
 mod context;
 mod page_size;
 pub(crate) mod stack;
-
+use self::context::{Context, Entry};
+use self::stack::StackSize;
 use std::cell::{Cell, UnsafeCell};
 use std::panic;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use std::{mem, ptr};
-
-use self::context::{Context, Entry};
-use self::stack::StackSize;
 
 pub static mut ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -153,7 +150,7 @@ impl Coroutine {
         self.status
     }
 
-    pub fn init(&mut self) {
+    pub(crate) fn init(&mut self) {
         let entry = Entry {
             f: Self::main,
             arg: (self as *mut Coroutine) as *mut libc::c_void,
@@ -180,7 +177,7 @@ impl Coroutine {
     // }
 
     /// Resumes coroutine.
-    pub fn resume(&mut self) -> bool {
+    pub(crate) fn resume(&mut self) -> bool {
         // println!("start resume");
 
         let _scope = Scope::enter(self);
@@ -196,7 +193,7 @@ impl Coroutine {
         }
     }
 
-    pub fn suspend(&mut self) {
+    pub(crate) fn suspend(&mut self) {
         // println!("start suspend");
         ThisThread::suspend(&mut self.context);
         if let Some(msg) = self.panicking {

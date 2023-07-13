@@ -1,10 +1,9 @@
+use nix::{sys::stat, unistd};
 use std::{
     fs::{self, File},
     io::{self, Read},
     path::PathBuf,
 };
-
-use nix::{sys::stat, unistd};
 
 pub enum ControllerType {
     CPUSET,
@@ -224,6 +223,7 @@ impl Controllerv2 {
         Ok(cgroup_type)
     }
 
+    /// FIXME:临时写的，只支持连续的CPU
     pub fn set_cpuset(&self, cpuset1: u8, cpuset2: Option<u8>) {
         let mut path = self.path.clone();
         path.push("cpuset.cpus");

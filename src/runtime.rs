@@ -1,6 +1,5 @@
-use std::{sync::Arc, thread::JoinHandle};
-
 use crate::{scheduler::Scheduler, task::Coroutine, StackSize};
+use std::{sync::Arc, thread::JoinHandle};
 
 pub(crate) struct Runtime {
     scheduler: Arc<Scheduler>,

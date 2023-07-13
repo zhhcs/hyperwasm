@@ -1,4 +1,19 @@
 # hyper-sched
+仅在Ubuntu 22.04环境下运行，需要root权限
+cargo build
+sudo ./target/debug/hyper-scheduler
+
+1. 建议绑定CPU运行：
+   修改内核启动参数
+        sudo vim /etc/default/grub
+   隔离CPU0和CPU1
+        GRUB_CMDLINE_LINUX="isolcpus=0,1"
+   更新
+        sudo update-grub
+   重启后生效
+
+2. 需要开启cgroupV2
+
 # 进度安排
 
 第一周（7/3-7/7）：

@@ -1,18 +1,10 @@
-use std::{cell::Cell, collections::VecDeque, ptr, sync::Arc};
-
-// use crossbeam::queue::ArrayQueue;
-// crossbeam = "0.8"
-
-pub(crate) type ArrayQueue<T> = VecDeque<T>;
-
-use nix::unistd::Pid;
-
+use super::{get_timer, Scheduler};
 use crate::{
     task::{current, current_is_none, CoStatus, Coroutine},
     StackSize,
 };
-
-use super::{get_timer, Scheduler};
+use nix::unistd::Pid;
+use std::{cell::Cell, collections::VecDeque, ptr, sync::Arc};
 
 thread_local! {
     static WORKER: Cell<Option<ptr::NonNull<Worker>>> = Cell::new(None);
@@ -21,6 +13,8 @@ thread_local! {
 pub(crate) fn get_worker() -> ptr::NonNull<Worker> {
     WORKER.with(|cell| cell.get()).expect("no worker")
 }
+
+pub(crate) type ArrayQueue<T> = VecDeque<T>;
 
 pub(crate) struct Worker {
     new_spawned: ArrayQueue<Box<Coroutine>>,
@@ -58,13 +52,13 @@ impl Worker {
     }
 
     pub(crate) fn set_cgroup(&self, tid: Pid) {
-        let cgworker = crate::cgroupv2::Controllerv2::new(
+        let cg_worker = crate::cgroupv2::Controllerv2::new(
             std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
             String::from("worker"),
         );
-        cgworker.set_threaded();
-        cgworker.set_cpuset(1, None);
-        cgworker.set_cgroup_threads(tid);
+        cg_worker.set_threaded();
+        cg_worker.set_cpuset(1, None);
+        cg_worker.set_cgroup_threads(tid);
     }
 
     pub(crate) fn set_curr(&mut self) {

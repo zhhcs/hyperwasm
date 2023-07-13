@@ -2,10 +2,8 @@ pub mod cgroupv2;
 pub mod runtime;
 pub mod scheduler;
 pub mod task;
-
-use std::{process::exit, sync::Arc};
-
 use runtime::Runtime;
+use std::{process::exit, sync::Arc};
 pub use task::stack::StackSize;
 
 static NUM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
