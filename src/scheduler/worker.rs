@@ -99,6 +99,11 @@ impl Worker {
                     // let id = co.get_co_id();
                     // println!("co id = {} is ready to run", id);
                     self.run_co(co.into());
+                } else {
+                    if self.len < self.capacity / 2 {
+                        self.get_task();
+                    }
+                    self.set_curr();
                 }
             }
         }

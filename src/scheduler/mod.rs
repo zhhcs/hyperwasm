@@ -39,6 +39,11 @@ struct LocalTimer {
 }
 
 impl LocalTimer {
+    /// create thread local timer
+    ///
+    /// expiration 0: disable timer
+    ///
+    /// others: enable timer
     fn new(thread_id: i32, expiration: u64) -> LocalTimer {
         // let thread_id = get_thread_id();
         let expiration = Expiration::Interval(Duration::from_millis(expiration).into());
@@ -102,7 +107,7 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 10);
+            let timer = LocalTimer::new(tid.into(), 0);
             timer.init();
 
             w.run();

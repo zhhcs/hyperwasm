@@ -13,14 +13,30 @@ fn main() {
     for i in 1..6 {
         rt.spawn(Box::new(move || {
             let i = i.clone();
-            do_some_sub(i);
+            if i % 2 == 0 {
+                do_some_sub(i);
+            } else {
+                do_some_add(i);
+            }
+            println!(
+                "NUM {}",
+                crate::NUM.load(std::sync::atomic::Ordering::Acquire)
+            );
         }))
         .unwrap();
     }
     for i in 1..6 {
         rt.spawn(Box::new(move || {
             let i = i.clone();
-            do_some_add(i);
+            if i % 2 == 0 {
+                do_some_add(i);
+            } else {
+                do_some_sub(i);
+            }
+            println!(
+                "NUM {}",
+                crate::NUM.load(std::sync::atomic::Ordering::Acquire)
+            );
         }))
         .unwrap();
     }
