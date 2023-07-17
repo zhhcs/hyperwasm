@@ -4,14 +4,15 @@ pub(crate) mod stack;
 use self::context::{Context, Entry};
 use self::stack::StackSize;
 use std::cell::{Cell, UnsafeCell};
-use std::panic;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+use std::{fmt, panic};
 use std::{mem, ptr};
 
-pub static mut ID: AtomicUsize = AtomicUsize::new(1);
+pub static mut ID: AtomicU64 = AtomicU64::new(1);
 
-fn get_id() -> usize {
+fn get_id() -> u64 {
     unsafe { ID.fetch_add(1, Ordering::SeqCst) }
 }
 
@@ -35,6 +36,7 @@ pub enum CoStatus {
     RUNNING,
     SUSPENDED,
     COMPLETED,
+    CANCELLED,
     // TODO!
 }
 
@@ -87,26 +89,48 @@ impl ThisThread {
     }
 }
 
-struct SchedulerStatus {
-    tick: u32,
-    create_time: Instant,
+#[derive(Clone, Debug)]
+pub(crate) struct SchedulerStatus {
+    status: BTreeMap<Instant, CoStatus>,
+    curr_start_time: Option<Instant>,
+    running_time: Duration,
 }
 
 impl SchedulerStatus {
-    pub fn new() -> SchedulerStatus {
+    fn new() -> SchedulerStatus {
         SchedulerStatus {
-            tick: 0,
-            create_time: Instant::now(),
+            status: BTreeMap::new(),
+            curr_start_time: None,
+            running_time: Duration::from_nanos(0),
         }
+    }
+
+    fn update_status(&mut self, now: Instant, stat: CoStatus) {
+        self.status.insert(now, stat);
+    }
+
+    fn update_running_time(&mut self, now: Instant) {
+        if let Some(start) = self.curr_start_time {
+            self.running_time += now - start;
+        }
+        self.curr_start_time = None;
     }
 }
 
+impl fmt::Display for SchedulerStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.status
+            .iter()
+            .for_each(|(time, stat)| writeln!(f, "{:?}, {:?}", time, stat).unwrap());
+        writeln!(f, "running time: {:?}", self.running_time)
+    }
+}
 pub(crate) struct Coroutine {
     context: Box<Context>,
     status: CoStatus,
     panicking: Option<&'static str>,
     f: Option<Box<dyn FnOnce()>>,
-    id: usize,
+    id: u64,
     stack_size: StackSize,
     schedule_status: SchedulerStatus,
 }
@@ -130,6 +154,8 @@ impl Coroutine {
             stack_size,
             schedule_status: SchedulerStatus::new(),
         });
+        co.schedule_status
+            .update_status(Instant::now(), CoStatus::PENDING);
         if thread_local {
             let entry = Entry {
                 f: Self::main,
@@ -138,6 +164,8 @@ impl Coroutine {
             };
             mem::forget(mem::replace(&mut co.context, Context::new(&entry, None)));
             co.status = CoStatus::READY;
+            co.schedule_status
+                .update_status(Instant::now(), CoStatus::READY);
         }
         co
     }
@@ -158,12 +186,17 @@ impl Coroutine {
         };
         mem::forget(mem::replace(&mut self.context, Context::new(&entry, None)));
         self.set_status(CoStatus::READY);
+        let now = Instant::now();
+        self.schedule_status.update_status(now, self.status);
     }
 
     extern "C" fn main(arg: *mut libc::c_void) {
         let co = unsafe { &mut *(arg as *mut Coroutine) };
         co.run();
         co.status = CoStatus::COMPLETED;
+        let now = Instant::now();
+        co.schedule_status.update_running_time(now);
+        co.schedule_status.update_status(now, CoStatus::COMPLETED);
         ThisThread::restore();
     }
 
@@ -179,6 +212,10 @@ impl Coroutine {
     /// Resumes coroutine.
     pub(crate) fn resume(&mut self) -> bool {
         // println!("start resume");
+        let now = Instant::now();
+        self.schedule_status.curr_start_time = Some(now);
+        self.status = CoStatus::RUNNING;
+        self.schedule_status.update_status(now, self.status);
 
         let _scope = Scope::enter(self);
 
@@ -186,22 +223,26 @@ impl Coroutine {
 
         match self.status {
             CoStatus::COMPLETED => false,
-            _ => {
-                self.set_status(CoStatus::RUNNING);
-                true
-            }
+            _ => true,
         }
     }
 
     pub(crate) fn suspend(&mut self) {
         // println!("start suspend");
+        let now = Instant::now();
+        self.schedule_status.update_status(now, self.status);
+        self.schedule_status.update_running_time(now);
         ThisThread::suspend(&mut self.context);
         if let Some(msg) = self.panicking {
             panic::panic_any(msg);
         }
     }
 
-    pub fn get_co_id(&self) -> usize {
+    pub fn get_co_id(&self) -> u64 {
         self.id
+    }
+
+    pub fn get_schedulestatus(&self) -> SchedulerStatus {
+        self.schedule_status.clone()
     }
 }

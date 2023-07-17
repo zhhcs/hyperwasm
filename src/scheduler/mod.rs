@@ -1,7 +1,7 @@
 use crate::{
     cgroupv2,
     scheduler::worker::{get_worker, Worker},
-    task::Coroutine,
+    task::{Coroutine, SchedulerStatus},
 };
 use nix::{
     sys::{
@@ -14,7 +14,7 @@ use nix::{
 };
 use std::{
     cell::Cell,
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     convert::TryFrom,
     ptr,
     sync::{Arc, Mutex},
@@ -84,6 +84,7 @@ impl LocalTimer {
 
 pub(crate) struct Scheduler {
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
+    co_status: Mutex<BTreeMap<u64, SchedulerStatus>>,
 }
 
 unsafe impl Send for Scheduler {}
@@ -93,6 +94,7 @@ impl Scheduler {
     pub(crate) fn new() -> Arc<Scheduler> {
         Arc::new(Scheduler {
             global_queue: Mutex::new(VecDeque::new()),
+            co_status: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -107,7 +109,7 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 0);
+            let timer = LocalTimer::new(tid.into(), 10);
             timer.init();
 
             w.run();
@@ -168,6 +170,19 @@ impl Scheduler {
         } else {
             0
         }
+    }
+
+    pub(crate) fn update_status(&self, co_id: u64, stat: SchedulerStatus) {
+        if let Ok(status) = self.co_status.try_lock().as_mut() {
+            status.insert(co_id, stat);
+        }
+    }
+
+    pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+        if let Ok(status) = self.co_status.try_lock().as_mut() {
+            return Some(status.clone());
+        }
+        None
     }
 }
 

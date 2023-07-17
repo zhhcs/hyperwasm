@@ -130,10 +130,13 @@ impl Worker {
 
     fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>) {
         // println!("running coroutine");
-        if unsafe { co.as_mut().resume() } {
+        let c = unsafe { co.as_mut() };
+        if c.resume() {
             return;
         }
         self.len -= 1;
+        self.scheduler
+            .update_status(c.get_co_id(), c.get_schedulestatus());
         Self::drop_coroutine(co);
     }
 

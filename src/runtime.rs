@@ -17,6 +17,13 @@ impl Runtime {
         let co = Coroutine::new(Box::new(move || f()), StackSize::default(), false);
         self.scheduler.push(co)
     }
+
+    pub fn print_status(&self) {
+        let s = self.scheduler.get_status().unwrap();
+        s.iter().for_each(|(id, stat)| {
+            println!("id: {}, status: \n{}", id, stat);
+        });
+    }
 }
 
 impl Drop for Runtime {

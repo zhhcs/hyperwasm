@@ -10,7 +10,7 @@ static NUM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 fn main() {
     let rt = Arc::new(Runtime::new());
-    for i in 1..6 {
+    for i in 1..3 {
         rt.spawn(Box::new(move || {
             let i = i.clone();
             if i % 2 == 0 {
@@ -25,7 +25,7 @@ fn main() {
         }))
         .unwrap();
     }
-    for i in 1..6 {
+    for i in 1..3 {
         rt.spawn(Box::new(move || {
             let i = i.clone();
             if i % 2 == 0 {
@@ -43,6 +43,7 @@ fn main() {
 
     std::thread::sleep(std::time::Duration::from_millis(10_000));
     assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);
+    rt.print_status();
     exit(0);
 }
 
