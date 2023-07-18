@@ -116,7 +116,7 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 5);
+            let timer = LocalTimer::new(tid.into(), 0);
             timer.init();
 
             w.run();

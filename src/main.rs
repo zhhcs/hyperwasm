@@ -11,37 +11,48 @@ static NUM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 fn main() {
     let rt = Arc::new(Runtime::new());
     for i in 1..3 {
-        rt.spawn(Box::new(move || {
-            let i = i.clone();
-            if i % 2 == 0 {
-                do_some_sub(i);
-            } else {
-                do_some_add(i);
-            }
-            println!(
-                "NUM {}",
-                crate::NUM.load(std::sync::atomic::Ordering::Acquire)
-            );
-        }))
+        rt.spawn(
+            Box::new(move || {
+                let i = i.clone();
+                if i % 2 == 0 {
+                    do_some_sub(i);
+                } else {
+                    do_some_add(i);
+                }
+                // println!(
+                //     "NUM {}",
+                //     crate::NUM.load(std::sync::atomic::Ordering::Acquire)
+                // );
+            }),
+            Some(std::time::Duration::from_millis(18)),
+            Some(std::time::Duration::from_millis(100)),
+        )
         .unwrap();
     }
     for i in 1..3 {
-        rt.spawn(Box::new(move || {
-            let i = i.clone();
-            if i % 2 == 0 {
-                do_some_add(i);
-            } else {
-                do_some_sub(i);
-            }
-            println!(
-                "NUM {}",
-                crate::NUM.load(std::sync::atomic::Ordering::Acquire)
-            );
-        }))
+        rt.spawn(
+            Box::new(move || {
+                let i = i.clone();
+                if i % 2 == 0 {
+                    do_some_add(i);
+                } else {
+                    do_some_sub(i);
+                }
+                // println!(
+                //     "NUM {}",
+                //     crate::NUM.load(std::sync::atomic::Ordering::Acquire)
+                // );
+            }),
+            Some(std::time::Duration::from_millis(18)),
+            Some(std::time::Duration::from_millis(50)),
+        )
         .unwrap();
     }
 
-    std::thread::sleep(std::time::Duration::from_millis(10_000));
+    // std::thread::sleep(std::time::Duration::from_millis(20));
+    // rt.print_status();
+
+    std::thread::sleep(std::time::Duration::from_millis(1_000));
     assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);
     rt.print_status();
     exit(0);

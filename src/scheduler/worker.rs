@@ -116,12 +116,13 @@ impl Worker {
                 curr.set_status(CoStatus::SUSPENDED);
             }
             self.suspend_queue.push_back(curr.into());
-            curr.suspend();
+            curr.suspend(&self.scheduler);
         }
     }
 
-    pub fn spawn_local(&mut self, f: Box<dyn FnOnce()>) {
-        let co = Coroutine::new(f, StackSize::default(), true);
+    // TODO: spawn local
+    pub fn _spawn_local(&mut self, f: Box<dyn FnOnce()>) {
+        let co = Coroutine::new(f, StackSize::default(), true, None, None);
         let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
         self.local_queue.push_back(co);
         self.len += 1;
@@ -131,7 +132,7 @@ impl Worker {
     fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>) {
         // println!("running coroutine");
         let c = unsafe { co.as_mut() };
-        if c.resume() {
+        if c.resume(&self.scheduler) {
             return;
         }
         self.len -= 1;

@@ -1,11 +1,14 @@
 mod context;
 mod page_size;
 pub(crate) mod stack;
+use crate::scheduler::Scheduler;
+
 use self::context::{Context, Entry};
 use self::stack::StackSize;
 use std::cell::{Cell, UnsafeCell};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, panic};
 use std::{mem, ptr};
@@ -92,20 +95,52 @@ impl ThisThread {
 #[derive(Clone, Debug)]
 pub(crate) struct SchedulerStatus {
     status: BTreeMap<Instant, CoStatus>,
+    co_id: u64,
+    co_status: CoStatus,
     curr_start_time: Option<Instant>,
     running_time: Duration,
+
+    spawn_time: Instant,
+    expected_execution_time: Option<Duration>,
+    expected_remaining_execution_time: Option<Duration>,
+    relative_deadline: Option<Duration>,
+    absolute_deadline: Option<Instant>,
 }
 
 impl SchedulerStatus {
-    fn new() -> SchedulerStatus {
+    fn new(
+        expected_execution_time: Option<Duration>,
+        relative_deadline: Option<Duration>,
+    ) -> SchedulerStatus {
         SchedulerStatus {
             status: BTreeMap::new(),
+            co_id: 0,
+            co_status: CoStatus::PENDING,
             curr_start_time: None,
             running_time: Duration::from_nanos(0),
+            spawn_time: Instant::now(),
+            expected_execution_time,
+            expected_remaining_execution_time: expected_execution_time,
+            relative_deadline,
+            absolute_deadline: None,
+        }
+    }
+
+    fn init(&mut self, id: u64) {
+        self.co_id = id;
+        if let Some(rd) = self.relative_deadline {
+            self.absolute_deadline = Some(self.spawn_time + rd);
+        }
+    }
+
+    fn update_remaining(&mut self) {
+        if let Some(eet) = self.expected_execution_time {
+            self.expected_remaining_execution_time = Some(eet - self.running_time);
         }
     }
 
     fn update_status(&mut self, now: Instant, stat: CoStatus) {
+        self.co_status = stat;
         self.status.insert(now, stat);
     }
 
@@ -144,6 +179,8 @@ impl Coroutine {
         f: Box<dyn FnOnce()>,
         stack_size: StackSize,
         thread_local: bool,
+        expected_execution_time: Option<Duration>,
+        relative_deadline: Option<Duration>,
     ) -> Box<Coroutine> {
         #[allow(invalid_value)]
         let mut co = Box::new(Coroutine {
@@ -153,10 +190,11 @@ impl Coroutine {
             panicking: None,
             id: get_id(),
             stack_size,
-            schedule_status: SchedulerStatus::new(),
+            schedule_status: SchedulerStatus::new(expected_execution_time, relative_deadline),
         });
         co.schedule_status
-            .update_status(Instant::now(), CoStatus::PENDING);
+            .update_status(co.schedule_status.spawn_time, CoStatus::PENDING);
+        co.schedule_status.init(co.id);
         if thread_local {
             let entry = Entry {
                 f: Self::main,
@@ -197,6 +235,7 @@ impl Coroutine {
         co.status = CoStatus::COMPLETED;
         let now = Instant::now();
         co.schedule_status.update_running_time(now);
+        co.schedule_status.update_remaining();
         co.schedule_status.update_status(now, CoStatus::COMPLETED);
         ThisThread::restore();
     }
@@ -211,12 +250,14 @@ impl Coroutine {
     // }
 
     /// Resumes coroutine.
-    pub(crate) fn resume(&mut self) -> bool {
+    pub(crate) fn resume(&mut self, sched: &Arc<Scheduler>) -> bool {
         // println!("start resume");
         let now = Instant::now();
         self.schedule_status.curr_start_time = Some(now);
         self.status = CoStatus::RUNNING;
         self.schedule_status.update_status(now, self.status);
+
+        sched.update_status(self.get_co_id(), self.get_schedulestatus());
 
         let _scope = Scope::enter(self);
 
@@ -228,11 +269,13 @@ impl Coroutine {
         }
     }
 
-    pub(crate) fn suspend(&mut self) {
+    pub(crate) fn suspend(&mut self, sched: &Arc<Scheduler>) {
         // println!("start suspend");
         let now = Instant::now();
         self.schedule_status.update_status(now, self.status);
         self.schedule_status.update_running_time(now);
+        self.schedule_status.update_remaining();
+        sched.update_status(self.get_co_id(), self.get_schedulestatus());
         ThisThread::suspend(&mut self.context);
         if let Some(msg) = self.panicking {
             panic::panic_any(msg);
