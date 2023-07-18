@@ -103,6 +103,7 @@ pub(crate) struct SchedulerStatus {
     spawn_time: Instant,
     expected_execution_time: Option<Duration>,
     expected_remaining_execution_time: Option<Duration>,
+    worst_start_time: Option<Instant>,
     relative_deadline: Option<Duration>,
     absolute_deadline: Option<Instant>,
 }
@@ -121,6 +122,7 @@ impl SchedulerStatus {
             spawn_time: Instant::now(),
             expected_execution_time,
             expected_remaining_execution_time: expected_execution_time,
+            worst_start_time: None,
             relative_deadline,
             absolute_deadline: None,
         }
@@ -130,12 +132,19 @@ impl SchedulerStatus {
         self.co_id = id;
         if let Some(rd) = self.relative_deadline {
             self.absolute_deadline = Some(self.spawn_time + rd);
+            self.worst_start_time =
+                Some(self.spawn_time + rd - self.expected_execution_time.unwrap());
         }
     }
 
     fn update_remaining(&mut self) {
         if let Some(eet) = self.expected_execution_time {
-            self.expected_remaining_execution_time = Some(eet - self.running_time);
+            if eet > self.running_time {
+                self.expected_remaining_execution_time = Some(eet - self.running_time);
+            } else {
+                self.expected_remaining_execution_time = None;
+                println!("panicked at 'overflow when subtracting durations");
+            }
         }
     }
 
@@ -152,12 +161,39 @@ impl SchedulerStatus {
     }
 }
 
+impl Ord for SchedulerStatus {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.absolute_deadline.cmp(&other.absolute_deadline) {
+            std::cmp::Ordering::Less => std::cmp::Ordering::Greater,
+            std::cmp::Ordering::Equal => std::cmp::Ordering::Equal,
+            std::cmp::Ordering::Greater => std::cmp::Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for SchedulerStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for SchedulerStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.absolute_deadline == other.absolute_deadline
+    }
+}
+
+impl Eq for SchedulerStatus {}
+
 impl fmt::Display for SchedulerStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let start = crate::scheduler::get_start();
         self.status
             .iter()
             .for_each(|(time, stat)| writeln!(f, "{:?}, {:?}", *time - start, stat).unwrap());
+        if let Some(deadline) = self.absolute_deadline {
+            writeln!(f, "deadline {:?}", deadline - start).unwrap();
+        }
         writeln!(f, "running time: {:?}", self.running_time)
     }
 }
@@ -256,8 +292,8 @@ impl Coroutine {
         self.schedule_status.curr_start_time = Some(now);
         self.status = CoStatus::RUNNING;
         self.schedule_status.update_status(now, self.status);
-
         sched.update_status(self.get_co_id(), self.get_schedulestatus());
+        sched.set_curr_running_id(self.get_co_id());
 
         let _scope = Scope::enter(self);
 
@@ -289,4 +325,36 @@ impl Coroutine {
     pub fn get_schedulestatus(&self) -> SchedulerStatus {
         self.schedule_status.clone()
     }
+
+    pub fn is_realtime(&self) -> bool {
+        self.schedule_status.absolute_deadline.is_some()
+    }
 }
+
+impl Ord for Coroutine {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self
+            .schedule_status
+            .absolute_deadline
+            .cmp(&other.schedule_status.absolute_deadline)
+        {
+            std::cmp::Ordering::Less => std::cmp::Ordering::Greater,
+            std::cmp::Ordering::Equal => std::cmp::Ordering::Equal,
+            std::cmp::Ordering::Greater => std::cmp::Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for Coroutine {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Coroutine {
+    fn eq(&self, other: &Self) -> bool {
+        self.schedule_status.absolute_deadline == other.schedule_status.absolute_deadline
+    }
+}
+
+impl Eq for Coroutine {}

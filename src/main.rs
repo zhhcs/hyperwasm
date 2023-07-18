@@ -24,10 +24,11 @@ fn main() {
                 //     crate::NUM.load(std::sync::atomic::Ordering::Acquire)
                 // );
             }),
-            Some(std::time::Duration::from_millis(18)),
-            Some(std::time::Duration::from_millis(100)),
+            Some(std::time::Duration::from_millis(60)),
+            Some(std::time::Duration::from_millis(300)),
         )
         .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
     for i in 1..3 {
         rt.spawn(
@@ -43,16 +44,17 @@ fn main() {
                 //     crate::NUM.load(std::sync::atomic::Ordering::Acquire)
                 // );
             }),
-            Some(std::time::Duration::from_millis(18)),
-            Some(std::time::Duration::from_millis(50)),
+            Some(std::time::Duration::from_millis(60)),
+            Some(std::time::Duration::from_millis(200)),
         )
         .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
     // std::thread::sleep(std::time::Duration::from_millis(20));
     // rt.print_status();
 
-    std::thread::sleep(std::time::Duration::from_millis(1_000));
+    std::thread::sleep(std::time::Duration::from_millis(5_000));
     assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);
     rt.print_status();
     exit(0);

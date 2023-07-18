@@ -4,7 +4,12 @@ use crate::{
     StackSize,
 };
 use nix::unistd::Pid;
-use std::{cell::Cell, collections::VecDeque, ptr, sync::Arc};
+use std::{
+    cell::Cell,
+    collections::{BinaryHeap, VecDeque},
+    ptr,
+    sync::Arc,
+};
 
 thread_local! {
     static WORKER: Cell<Option<ptr::NonNull<Worker>>> = Cell::new(None);
@@ -20,6 +25,7 @@ pub(crate) struct Worker {
     new_spawned: ArrayQueue<Box<Coroutine>>,
     local_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
     suspend_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
+    realtime_queue: BinaryHeap<ptr::NonNull<Coroutine>>,
     scheduler: Arc<Scheduler>,
     curr: Option<ptr::NonNull<Coroutine>>,
     capacity: usize,
@@ -35,10 +41,13 @@ impl Worker {
         let new_spawned = ArrayQueue::with_capacity(capacity);
         let local_queue = ArrayQueue::with_capacity(capacity);
         let suspend_queue = ArrayQueue::with_capacity(capacity);
+        let realtime_queue = BinaryHeap::with_capacity(capacity);
+
         Arc::new(Worker {
             new_spawned,
             local_queue,
             suspend_queue,
+            realtime_queue,
             scheduler: scheduler.clone(),
             curr: None,
             capacity,
@@ -61,9 +70,14 @@ impl Worker {
         cg_worker.set_cgroup_threads(tid);
     }
 
-    pub(crate) fn set_curr(&mut self) {
-        if current_is_none() {
-            if let Some(co) = self.local_queue.pop_front() {
+    pub(crate) fn set_curr(&mut self, co: Option<Box<Coroutine>>) {
+        if let Some(co) = co {
+            let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+            self.curr = Some(co);
+        } else if current_is_none() {
+            if let Some(co) = self.realtime_queue.pop() {
+                self.curr = Some(co);
+            } else if let Some(co) = self.local_queue.pop_front() {
                 self.curr = Some(co);
             } else if let Some(co) = self.new_spawned.pop_front() {
                 let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
@@ -72,6 +86,14 @@ impl Worker {
                 self.curr = Some(co);
             }
         }
+    }
+
+    pub(crate) fn get_realtime(&mut self) -> Option<Box<Coroutine>> {
+        if let Some(co) = self.scheduler.pop_realtime() {
+            self.len += 1;
+            return Some(co);
+        }
+        None
     }
 
     pub(crate) fn get_task(&mut self) {
@@ -99,11 +121,13 @@ impl Worker {
                     // let id = co.get_co_id();
                     // println!("co id = {} is ready to run", id);
                     self.run_co(co.into());
+                } else if let Some(co) = self.get_realtime() {
+                    self.set_curr(Some(co));
                 } else {
                     if self.len < self.capacity / 2 {
                         self.get_task();
                     }
-                    self.set_curr();
+                    self.set_curr(None);
                 }
             }
         }
@@ -115,7 +139,11 @@ impl Worker {
             if curr.get_status() != CoStatus::COMPLETED {
                 curr.set_status(CoStatus::SUSPENDED);
             }
-            self.suspend_queue.push_back(curr.into());
+            if curr.is_realtime() {
+                self.realtime_queue.push(curr.into());
+            } else {
+                self.suspend_queue.push_back(curr.into());
+            }
             curr.suspend(&self.scheduler);
         }
     }

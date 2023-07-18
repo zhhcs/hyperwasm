@@ -28,7 +28,7 @@ impl Runtime {
         );
         self.scheduler
             .update_status(co.get_co_id(), co.get_schedulestatus());
-        self.scheduler.push(co)
+        self.scheduler.push(co, expected_execution_time.is_some())
     }
 
     pub fn print_status(&self) {
