@@ -13,6 +13,15 @@ sudo ./target/debug/hyper-scheduler
    重启后生效
 
 2. 需要开启cgroupV2
+   要授权其他控制器，如 cpu cpuset 和 io ，执行以下命令:
+
+     sudo mkdir -p /etc/systemd/system/user@.service.d
+     cat <<EOF | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+     [Service]
+     Delegate=cpu cpuset io memory pids
+     EOF
+
+     sudo systemctl daemon-reload
 
 # 进度安排
 
