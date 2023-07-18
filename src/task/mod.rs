@@ -119,9 +119,10 @@ impl SchedulerStatus {
 
 impl fmt::Display for SchedulerStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let start = crate::scheduler::get_start();
         self.status
             .iter()
-            .for_each(|(time, stat)| writeln!(f, "{:?}, {:?}", time, stat).unwrap());
+            .for_each(|(time, stat)| writeln!(f, "{:?}, {:?}", *time - start, stat).unwrap());
         writeln!(f, "running time: {:?}", self.running_time)
     }
 }

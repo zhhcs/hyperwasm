@@ -19,7 +19,7 @@ use std::{
     ptr,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(crate) mod worker;
@@ -27,10 +27,15 @@ const SIG: Signal = Signal::SIGURG;
 
 thread_local! {
     static TIMER: Cell<Option<ptr::NonNull<LocalTimer>>> = Cell::new(None);
+    static START: Cell<Option<Instant>> = Cell::new(None);
 }
 
 fn get_timer() -> ptr::NonNull<LocalTimer> {
     TIMER.with(|cell| cell.get()).expect("no timer")
+}
+
+pub(crate) fn get_start() -> Instant {
+    START.with(|cell| cell.get()).expect("no start")
 }
 
 struct LocalTimer {
@@ -101,6 +106,8 @@ impl Scheduler {
     pub(crate) fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
         Self::create_cg();
         let scheduler = self.clone();
+        START.with(|cell: &Cell<Option<Instant>>| cell.set(Some(Instant::now())));
+
         let t = thread::spawn(move || {
             let w = Worker::new(&scheduler, 4);
             let tid = gettid();
@@ -109,7 +116,7 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 10);
+            let timer = LocalTimer::new(tid.into(), 5);
             timer.init();
 
             w.run();
