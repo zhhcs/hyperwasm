@@ -15,58 +15,50 @@ fn main() {
             Box::new(move || {
                 let i = i.clone();
                 if i % 2 == 0 {
-                    do_some_sub(i);
+                    do_some_sub();
                 } else {
-                    do_some_add(i);
+                    do_some_add();
                 }
-                // println!(
-                //     "NUM {}",
-                //     crate::NUM.load(std::sync::atomic::Ordering::Acquire)
-                // );
             }),
-            Some(std::time::Duration::from_millis(60)),
-            Some(std::time::Duration::from_millis(300)),
+            None,
+            None,
         )
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    for i in 1..3 {
+    for i in 1..7 {
         rt.spawn(
             Box::new(move || {
                 let i = i.clone();
                 if i % 2 == 0 {
-                    do_some_add(i);
+                    do_some_sub();
                 } else {
-                    do_some_sub(i);
+                    do_some_add();
                 }
-                // println!(
-                //     "NUM {}",
-                //     crate::NUM.load(std::sync::atomic::Ordering::Acquire)
-                // );
             }),
-            Some(std::time::Duration::from_millis(60)),
-            Some(std::time::Duration::from_millis(200)),
+            Some(std::time::Duration::from_millis(35)),
+            Some(std::time::Duration::from_millis(rand::Rng::gen_range(
+                &mut rand::thread_rng(),
+                100..240,
+            ))),
         )
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    // std::thread::sleep(std::time::Duration::from_millis(20));
-    // rt.print_status();
-
-    std::thread::sleep(std::time::Duration::from_millis(5_000));
+    std::thread::sleep(std::time::Duration::from_millis(2_000));
     assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);
     rt.print_status();
     exit(0);
 }
 
-fn do_some_add(i: i32) {
-    for _ in 0..1_000_000 {
-        NUM.fetch_add(i, std::sync::atomic::Ordering::Acquire);
+fn do_some_add() {
+    for _ in 0..5_000_000 {
+        NUM.fetch_add(2, std::sync::atomic::Ordering::Acquire);
     }
 }
-fn do_some_sub(i: i32) {
-    for _ in 0..1_000_000 {
-        NUM.fetch_sub(i, std::sync::atomic::Ordering::Acquire);
+fn do_some_sub() {
+    for _ in 0..5_000_000 {
+        NUM.fetch_sub(2, std::sync::atomic::Ordering::Acquire);
     }
 }

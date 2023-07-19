@@ -70,11 +70,8 @@ impl Worker {
         cg_worker.set_cgroup_threads(tid);
     }
 
-    pub(crate) fn set_curr(&mut self, co: Option<Box<Coroutine>>) {
-        if let Some(co) = co {
-            let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
-            self.curr = Some(co);
-        } else if current_is_none() {
+    pub(crate) fn set_curr(&mut self) {
+        if current_is_none() {
             if let Some(co) = self.realtime_queue.pop() {
                 self.curr = Some(co);
             } else if let Some(co) = self.local_queue.pop_front() {
@@ -88,15 +85,12 @@ impl Worker {
         }
     }
 
-    pub(crate) fn get_realtime(&mut self) -> Option<Box<Coroutine>> {
-        if let Some(co) = self.scheduler.pop_realtime() {
-            self.len += 1;
-            return Some(co);
-        }
-        None
-    }
-
     pub(crate) fn get_task(&mut self) {
+        while let Some(co) = self.scheduler.pop_realtime() {
+            self.realtime_queue
+                .push(ptr::NonNull::from(Box::leak(Box::new(*co))));
+            self.len += 1;
+        }
         while !self.is_full() && self.scheduler.get_length() > 0 {
             if let Some(co) = self.scheduler.pop() {
                 // println!("get coroutine co id = {} from global queue", co.get_co_id());
@@ -121,13 +115,11 @@ impl Worker {
                     // let id = co.get_co_id();
                     // println!("co id = {} is ready to run", id);
                     self.run_co(co.into());
-                } else if let Some(co) = self.get_realtime() {
-                    self.set_curr(Some(co));
                 } else {
                     if self.len < self.capacity / 2 {
                         self.get_task();
                     }
-                    self.set_curr(None);
+                    self.set_curr();
                 }
             }
         }

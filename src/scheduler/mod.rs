@@ -129,7 +129,7 @@ impl Scheduler {
         Self::create_cg();
         let scheduler = self.clone();
         START.with(|cell: &Cell<Option<Instant>>| cell.set(Some(Instant::now())));
-        let (sender, receiver) = std::sync::mpsc::channel();
+        // let (sender, receiver) = std::sync::mpsc::channel();
         let t = thread::spawn(move || {
             let w = Worker::new(&scheduler, 16);
             let tid = gettid();
@@ -138,26 +138,26 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 0, SIG, 3);
+            let timer = LocalTimer::new(tid.into(), 10_000_000, SIG, 3);
             timer.init();
-            sender.send(tid).unwrap();
+            // sender.send(tid).unwrap();
             w.run();
         });
 
-        let scheduler = self.clone();
-        thread::spawn(move || {
-            let cg_worker = crate::cgroupv2::Controllerv2::new(
-                std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
-                String::from("monitor"),
-            );
-            cg_worker.set_threaded();
-            cg_worker.set_cpuset(0, None);
-            cg_worker.set_cgroup_threads(gettid());
+        // let scheduler = self.clone();
+        // thread::spawn(move || {
+        //     let cg_worker = crate::cgroupv2::Controllerv2::new(
+        //         std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+        //         String::from("monitor"),
+        //     );
+        //     cg_worker.set_threaded();
+        //     cg_worker.set_cpuset(0, None);
+        //     cg_worker.set_cgroup_threads(gettid());
 
-            let tid = receiver.recv().unwrap().into();
-            thread::sleep(Duration::from_millis(10));
-            scheduler.check_realtime(tid);
-        });
+        //     let tid = receiver.recv().unwrap().into();
+        //     thread::sleep(Duration::from_millis(10));
+        //     scheduler.check_realtime(tid);
+        // });
 
         let mut v = Vec::new();
         v.push(t);
@@ -285,10 +285,10 @@ extern "C" fn signal_handler(signal: libc::c_int) {
         }
 
         let worker = unsafe { get_worker().as_mut() };
-        if let Some(co) = worker.get_realtime() {
-            worker.suspend();
-            worker.set_curr(Some(co));
-        }
+
+        worker.suspend();
+        worker.get_task();
+        worker.set_curr();
 
         unsafe { get_timer().as_mut() }.reset_timer();
 
@@ -306,7 +306,7 @@ extern "C" fn signal_handler(signal: libc::c_int) {
         let worker = unsafe { get_worker().as_mut() };
         worker.suspend();
         worker.get_task();
-        worker.set_curr(None);
+        worker.set_curr();
 
         unsafe { get_timer().as_mut() }.reset_timer();
 
