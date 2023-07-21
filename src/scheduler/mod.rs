@@ -1,7 +1,7 @@
 use crate::{
     cgroupv2,
     scheduler::worker::{get_worker, Worker},
-    task::{Coroutine, SchedulerStatus},
+    task::{current, Coroutine, SchedulerStatus},
 };
 use nix::{
     sys::{
@@ -149,7 +149,7 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 00_000_000, SIG, 3);
+            let timer = LocalTimer::new(tid.into(), 10_000_000, SIG, 3);
             timer.init();
             w.run();
         });
@@ -332,10 +332,16 @@ extern "C" fn signal_handler(signal: libc::c_int) {
             libc::sigprocmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
         }
 
-        let worker = unsafe { get_worker().as_mut() };
-        worker.suspend();
-        worker.get_task();
-        worker.set_curr();
+        if let Some(current) = current() {
+            if unsafe { !current.as_ref().is_realtime() } {
+                let worker = unsafe { get_worker().as_mut() };
+                if worker.len > 1 {
+                    worker.suspend();
+                    worker.get_task();
+                    worker.set_curr();
+                }
+            }
+        }
 
         unsafe { get_timer().as_mut() }.reset_timer();
 
