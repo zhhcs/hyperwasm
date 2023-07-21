@@ -319,7 +319,7 @@ extern "C" fn signal_handler(signal: libc::c_int) {
             // println!("time cost: {:?}", end - start);
         };
         unsafe { get_timer().as_mut() }.reset_timer();
-        println!("now suspended {:?}", Instant::now());
+        // println!("now suspended {:?}", Instant::now());
 
         unsafe {
             libc::sigemptyset(&mut mask);

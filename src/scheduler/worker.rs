@@ -77,7 +77,7 @@ impl Worker {
     pub fn set_curr(&mut self) {
         if current_is_none() {
             if let Some(co) = self.take_realtime() {
-                println!("now setting current {:?}", std::time::Instant::now());
+                // println!("now setting current {:?}", std::time::Instant::now());
                 self.curr = Some(co);
             } else if let Some(co) = self.local_queue.pop_front() {
                 self.curr = Some(co);
@@ -120,7 +120,7 @@ impl Worker {
 
     pub fn get_task(&mut self) {
         while let Some(co) = self.scheduler.pop_realtime() {
-            println!("now getting task {:?}", std::time::Instant::now());
+            // println!("now getting task {:?}", std::time::Instant::now());
             self.add_realtime(co);
             self.len += 1;
         }

@@ -72,7 +72,7 @@ impl Runtime {
     fn is_schedulable(&self, co_stat: &SchedulerStatus) -> AdmissionControll {
         if let Some(mut status_map) = self.scheduler.get_status() {
             if status_map.is_empty() {
-                println!("case 1");
+                // println!("case 1");
                 return AdmissionControll::SCHEDULABLE;
             }
             let curr: u64 = self.scheduler.get_curr_running_id();
@@ -85,8 +85,7 @@ impl Runtime {
                     curr_stat.expected_remaining_execution_time = Some(eret);
                 });
             } else {
-                println!("case 2");
-
+                // println!("case 2");
                 return AdmissionControll::PREEMPTIVE;
             }
 
@@ -107,21 +106,18 @@ impl Runtime {
                         (s.absolute_deadline.unwrap() - start).as_micros() as i128 as f64;
                     let util = total_remaining / deadline;
                     if util > 1.0 {
-                        println!("case 3");
-
+                        // println!("case 3");
                         return AdmissionControll::UNSCHEDULABLE;
                     }
                 }
             }
 
             if stat_vec.peek().unwrap().eq(&co_stat) {
-                println!("case 4");
-
+                // println!("case 4");
                 return AdmissionControll::PREEMPTIVE;
             }
         }
-        println!("case 5");
-
+        // println!("case 5");
         AdmissionControll::SCHEDULABLE
     }
 
