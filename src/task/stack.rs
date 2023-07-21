@@ -41,7 +41,7 @@ impl StackSize {
     }
 }
 
-pub(crate) struct Stack {
+pub struct Stack {
     base: *mut u8,
     size: libc::size_t,
 }

@@ -1,7 +1,7 @@
 # hyper-sched
 仅在Ubuntu 22.04环境下运行，需要root权限
-cargo build
-sudo ./target/debug/hyper-scheduler
+cargo build --package hyper-scheduler --example spawn 
+sudo ./target/debug/examples/spawn
 
 1. 建议绑定CPU运行：
    修改内核启动参数

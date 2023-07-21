@@ -9,19 +9,20 @@ use std::{
     collections::{BinaryHeap, VecDeque},
     ptr,
     sync::Arc,
+    // time::Instant,
 };
 
 thread_local! {
     static WORKER: Cell<Option<ptr::NonNull<Worker>>> = Cell::new(None);
 }
 
-pub(crate) fn get_worker() -> ptr::NonNull<Worker> {
+pub fn get_worker() -> ptr::NonNull<Worker> {
     WORKER.with(|cell| cell.get()).expect("no worker")
 }
 
-pub(crate) type ArrayQueue<T> = VecDeque<T>;
+pub type ArrayQueue<T> = VecDeque<T>;
 
-pub(crate) struct Worker {
+pub struct Worker {
     new_spawned: ArrayQueue<Box<Coroutine>>,
     local_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
     suspend_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
@@ -37,7 +38,7 @@ unsafe impl Send for Worker {}
 unsafe impl Sync for Worker {}
 
 impl Worker {
-    pub(crate) fn new(scheduler: &Arc<Scheduler>, capacity: usize) -> Arc<Worker> {
+    pub fn new(scheduler: &Arc<Scheduler>, capacity: usize) -> Arc<Worker> {
         let new_spawned = ArrayQueue::with_capacity(capacity);
         let local_queue = ArrayQueue::with_capacity(capacity);
         let suspend_queue = ArrayQueue::with_capacity(capacity);
@@ -55,12 +56,12 @@ impl Worker {
         })
     }
 
-    pub(crate) fn init(&self) {
+    pub fn init(&self) {
         let worker = ptr::NonNull::from(self);
         WORKER.with(|t| t.set(Some(worker)));
     }
 
-    pub(crate) fn set_cgroup(&self, tid: Pid) {
+    pub fn set_cgroup(&self, tid: Pid) {
         let cg_worker = crate::cgroupv2::Controllerv2::new(
             std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
             String::from("worker"),
@@ -70,9 +71,10 @@ impl Worker {
         cg_worker.set_cgroup_threads(tid);
     }
 
-    pub(crate) fn set_curr(&mut self) {
+    pub fn set_curr(&mut self) {
         if current_is_none() {
             if let Some(co) = self.realtime_queue.pop() {
+                println!("now setting current {:?}", std::time::Instant::now());
                 self.curr = Some(co);
             } else if let Some(co) = self.local_queue.pop_front() {
                 self.curr = Some(co);
@@ -85,8 +87,19 @@ impl Worker {
         }
     }
 
-    pub(crate) fn get_task(&mut self) {
+    pub fn preemptive(&mut self) -> bool {
+        while let Some(co) = self.scheduler.get_slot() {
+            // println!("{} preempt", co.get_co_id());
+            self.curr = Some(ptr::NonNull::from(Box::leak(Box::new(*co))));
+            self.len += 1;
+            return true;
+        }
+        false
+    }
+
+    pub fn get_task(&mut self) {
         while let Some(co) = self.scheduler.pop_realtime() {
+            println!("now getting task {:?}", std::time::Instant::now());
             self.realtime_queue
                 .push(ptr::NonNull::from(Box::leak(Box::new(*co))));
             self.len += 1;
@@ -104,7 +117,7 @@ impl Worker {
         self.len >= self.capacity
     }
 
-    pub(crate) fn run(&mut self) {
+    pub fn run(&mut self) {
         loop {
             if current_is_none() {
                 if let Some(mut co) = self.curr.take() {
@@ -113,7 +126,11 @@ impl Worker {
                         co.init();
                     }
                     // let id = co.get_co_id();
-                    // println!("co id = {} is ready to run", id);
+                    // println!(
+                    //     "now {:?} co id = {} is ready to run",
+                    //     std::time::Instant::now(),
+                    //     id
+                    // );
                     self.run_co(co.into());
                 } else {
                     if self.len < self.capacity / 2 {
@@ -125,7 +142,7 @@ impl Worker {
         }
     }
 
-    pub(crate) fn suspend(&mut self) {
+    pub fn suspend(&mut self) {
         if let Some(mut curr) = current() {
             let curr = unsafe { curr.as_mut() };
             if curr.get_status() != CoStatus::COMPLETED {
@@ -157,7 +174,7 @@ impl Worker {
         }
         self.len -= 1;
         self.scheduler
-            .update_status(c.get_co_id(), c.get_schedulestatus());
+            .update_completed_status(c.get_co_id(), c.get_schedulestatus());
         Self::drop_coroutine(co);
     }
 

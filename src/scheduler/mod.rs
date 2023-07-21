@@ -25,16 +25,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(crate) mod worker;
-const SIG: Signal = Signal::SIGURG;
-const PREEMPTY: Signal = Signal::SIGALRM;
-static mut EPOCH: AtomicU64 = AtomicU64::new(0);
-
-fn epoch() {
-    unsafe {
-        EPOCH.fetch_add(1, Ordering::SeqCst);
-    }
-}
+pub mod worker;
+pub const PREEMPTY: Signal = Signal::SIGURG;
+pub const SIG: Signal = Signal::SIGALRM;
+pub static mut PTHREADTID: nix::sys::pthread::Pthread = 0;
 
 thread_local! {
     static TIMER: Cell<Option<ptr::NonNull<LocalTimer>>> = Cell::new(None);
@@ -45,7 +39,7 @@ fn get_timer() -> ptr::NonNull<LocalTimer> {
     TIMER.with(|cell| cell.get()).expect("no timer")
 }
 
-pub(crate) fn get_start() -> Instant {
+pub fn get_start() -> Instant {
     START.with(|cell| cell.get()).expect("no start")
 }
 
@@ -96,7 +90,7 @@ impl LocalTimer {
         timer
     }
 
-    pub(crate) fn reset_timer(&mut self) {
+    pub fn reset_timer(&mut self) {
         let flags = TimerSetTimeFlags::empty();
         self.timer
             .set(self.expiration, flags)
@@ -105,10 +99,13 @@ impl LocalTimer {
     }
 }
 
-pub(crate) struct Scheduler {
+pub struct Scheduler {
+    slot: Mutex<Option<Box<Coroutine>>>,
     realtime_queue: Mutex<BinaryHeap<Box<Coroutine>>>,
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
+    cancelled_queue: Mutex<VecDeque<Box<Coroutine>>>,
     co_status: Mutex<BTreeMap<u64, SchedulerStatus>>,
+    completed_status: Mutex<BTreeMap<u64, SchedulerStatus>>,
     curr_running_id: AtomicU64,
 }
 
@@ -116,21 +113,35 @@ unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
 impl Scheduler {
-    pub(crate) fn new() -> Arc<Scheduler> {
+    pub fn new() -> Arc<Scheduler> {
         Arc::new(Scheduler {
+            slot: Mutex::new(None),
             realtime_queue: Mutex::new(BinaryHeap::new()),
             global_queue: Mutex::new(VecDeque::new()),
+            cancelled_queue: Mutex::new(VecDeque::new()),
             co_status: Mutex::new(BTreeMap::new()),
+            completed_status: Mutex::new(BTreeMap::new()),
             curr_running_id: AtomicU64::new(0),
         })
     }
 
-    pub(crate) fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
+    pub fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
         Self::create_cg();
         let scheduler = self.clone();
         START.with(|cell: &Cell<Option<Instant>>| cell.set(Some(Instant::now())));
-        // let (sender, receiver) = std::sync::mpsc::channel();
         let t = thread::spawn(move || {
+            let pthreadtid = nix::sys::pthread::pthread_self();
+            unsafe { PTHREADTID = pthreadtid };
+            let sa = libc::sigaction {
+                sa_sigaction: signal_handler as libc::sighandler_t,
+                sa_mask: unsafe { std::mem::zeroed() },
+                sa_flags: libc::SA_SIGINFO | libc::SA_RESTART,
+                sa_restorer: None,
+            };
+            unsafe {
+                libc::sigaction(libc::SIGURG, &sa, std::ptr::null_mut());
+            }
+
             let w = Worker::new(&scheduler, 16);
             let tid = gettid();
             w.set_cgroup(tid);
@@ -138,54 +149,14 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 10_000_000, SIG, 3);
+            let timer = LocalTimer::new(tid.into(), 00_000_000, SIG, 3);
             timer.init();
-            // sender.send(tid).unwrap();
             w.run();
         });
-
-        // let scheduler = self.clone();
-        // thread::spawn(move || {
-        //     let cg_worker = crate::cgroupv2::Controllerv2::new(
-        //         std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
-        //         String::from("monitor"),
-        //     );
-        //     cg_worker.set_threaded();
-        //     cg_worker.set_cpuset(0, None);
-        //     cg_worker.set_cgroup_threads(gettid());
-
-        //     let tid = receiver.recv().unwrap().into();
-        //     thread::sleep(Duration::from_millis(10));
-        //     scheduler.check_realtime(tid);
-        // });
 
         let mut v = Vec::new();
         v.push(t);
         v
-    }
-
-    pub(crate) fn check_realtime(&self, tid: i32) {
-        let mut cnt = 0;
-        loop {
-            let ep = unsafe { EPOCH.load(Ordering::SeqCst) };
-            if cnt != ep {
-                if let Ok(q) = self.realtime_queue.try_lock() {
-                    if let Ok(stat) = self.co_status.try_lock() {
-                        let stat = stat
-                            .get(&self.curr_running_id.load(Ordering::SeqCst))
-                            .unwrap();
-                        if let Some(co) = q.peek() {
-                            if co.get_schedulestatus().cmp(stat).is_gt() {
-                                let timer = LocalTimer::new(tid, 1000, PREEMPTY, 1);
-                                thread::sleep(Duration::from_nanos(1000));
-                                drop(timer);
-                            }
-                        }
-                    }
-                }
-                cnt = ep;
-            }
-        }
     }
 
     fn create_cg() {
@@ -212,11 +183,29 @@ impl Scheduler {
         cg_main.set_cgroup_threads(nix::unistd::gettid());
     }
 
-    pub(crate) fn push(&self, co: Box<Coroutine>, realtime: bool) -> Result<(), std::io::Error> {
+    pub fn set_slot(&self, co: Box<Coroutine>) {
+        while let Ok(slot) = self.slot.try_lock().as_mut() {
+            if slot.is_none() {
+                let _ = slot.insert(co);
+                // println!("slot inserted {:?}", Instant::now());
+                break;
+            }
+        }
+    }
+
+    pub fn get_slot(&self) -> Option<Box<Coroutine>> {
+        if let Ok(slot) = self.slot.try_lock().as_mut() {
+            // println!("try_get_slot");
+            slot.take()
+        } else {
+            None
+        }
+    }
+
+    pub fn push(&self, co: Box<Coroutine>, realtime: bool) -> Result<(), std::io::Error> {
         if realtime {
             if let Ok(q) = self.realtime_queue.try_lock().as_mut() {
                 q.push(co);
-                epoch();
                 return Ok(());
             }
         } else {
@@ -232,7 +221,13 @@ impl Scheduler {
         ))
     }
 
-    pub(crate) fn pop_realtime(&self) -> Option<Box<Coroutine>> {
+    pub fn cancell(&self, co: Box<Coroutine>) {
+        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
+            q.push_back(co);
+        }
+    }
+
+    pub fn pop_realtime(&self) -> Option<Box<Coroutine>> {
         if let Ok(q) = self.realtime_queue.try_lock().as_mut() {
             q.pop()
         } else {
@@ -240,7 +235,7 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn pop(&self) -> Option<Box<Coroutine>> {
+    pub fn pop(&self) -> Option<Box<Coroutine>> {
         if let Ok(q) = self.global_queue.try_lock().as_mut() {
             q.pop_front()
         } else {
@@ -248,7 +243,7 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn get_length(&self) -> usize {
+    pub fn get_length(&self) -> usize {
         if let Ok(q) = self.global_queue.try_lock() {
             q.len()
         } else {
@@ -256,9 +251,15 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn update_status(&self, co_id: u64, stat: SchedulerStatus) {
+    pub fn update_status(&self, co_id: u64, stat: SchedulerStatus) {
         if let Ok(status) = self.co_status.try_lock().as_mut() {
             status.insert(co_id, stat);
+        }
+    }
+
+    fn delete_status(&self, co_id: u64) {
+        if let Ok(status) = self.co_status.try_lock().as_mut() {
+            status.remove(&co_id);
         }
     }
 
@@ -269,13 +270,38 @@ impl Scheduler {
         None
     }
 
-    pub(crate) fn set_curr_running_id(&self, co_id: u64) {
+    pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+        if let Ok(status) = self.completed_status.try_lock().as_mut() {
+            return Some(status.clone());
+        }
+        None
+    }
+
+    pub fn update_completed_status(&self, co_id: u64, stat: SchedulerStatus) {
+        if let Ok(status) = self.completed_status.try_lock().as_mut() {
+            status.insert(co_id, stat);
+        }
+        self.delete_status(co_id);
+    }
+
+    pub fn set_curr_running_id(&self, co_id: u64) {
         self.curr_running_id.store(co_id, Ordering::SeqCst);
+    }
+
+    pub fn get_curr_running_id(&self) -> u64 {
+        self.curr_running_id.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Scheduler {
+    fn drop(&mut self) {
+        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
+            q.iter_mut().for_each(|co| co.init());
+        }
     }
 }
 
 extern "C" fn signal_handler(signal: libc::c_int) {
-    // println!("now {:?}", std::time::Instant::now());
     let signal = Signal::try_from(signal).unwrap();
     if signal == PREEMPTY {
         let mut mask: libc::sigset_t = unsafe { std::mem::zeroed() };
@@ -286,11 +312,14 @@ extern "C" fn signal_handler(signal: libc::c_int) {
 
         let worker = unsafe { get_worker().as_mut() };
 
-        worker.suspend();
-        worker.get_task();
-        worker.set_curr();
-
+        if worker.preemptive() {
+            // let start = Instant::now();
+            worker.suspend();
+            // let end = Instant::now();
+            // println!("time cost: {:?}", end - start);
+        };
         unsafe { get_timer().as_mut() }.reset_timer();
+        println!("now suspended {:?}", Instant::now());
 
         unsafe {
             libc::sigemptyset(&mut mask);

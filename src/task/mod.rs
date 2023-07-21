@@ -1,6 +1,6 @@
 mod context;
 mod page_size;
-pub(crate) mod stack;
+pub mod stack;
 use crate::scheduler::Scheduler;
 
 use self::context::{Context, Entry};
@@ -24,11 +24,11 @@ thread_local! {
     static THREAD_CONTEXT: UnsafeCell<Context> = UnsafeCell::new(Context::empty());
 }
 
-pub(crate) fn current() -> Option<ptr::NonNull<Coroutine>> {
+pub fn current() -> Option<ptr::NonNull<Coroutine>> {
     COROUTINE.with(|cell| cell.get())
 }
 
-pub(crate) fn current_is_none() -> bool {
+pub fn current_is_none() -> bool {
     COROUTINE.with(|cell| cell.get().is_none())
 }
 
@@ -61,6 +61,7 @@ impl Scope {
 
 impl Drop for Scope {
     fn drop(&mut self) {
+        // println!("scope dropped");
         COROUTINE.with(|cell| {
             let co = cell.replace(None).expect("no running coroutine");
             assert!(co == self.co, "running coroutine changed");
@@ -93,19 +94,19 @@ impl ThisThread {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SchedulerStatus {
+pub struct SchedulerStatus {
     status: BTreeMap<Instant, CoStatus>,
     co_id: u64,
     co_status: CoStatus,
-    curr_start_time: Option<Instant>,
+    pub curr_start_time: Option<Instant>,
     running_time: Duration,
 
     spawn_time: Instant,
     expected_execution_time: Option<Duration>,
-    expected_remaining_execution_time: Option<Duration>,
+    pub expected_remaining_execution_time: Option<Duration>,
     worst_start_time: Option<Instant>,
     relative_deadline: Option<Duration>,
-    absolute_deadline: Option<Instant>,
+    pub absolute_deadline: Option<Instant>,
 }
 
 impl SchedulerStatus {
@@ -139,10 +140,10 @@ impl SchedulerStatus {
 
     fn update_remaining(&mut self) {
         if let Some(eet) = self.expected_execution_time {
-            if eet > self.running_time {
+            if eet >= self.running_time {
                 self.expected_remaining_execution_time = Some(eet - self.running_time);
             } else {
-                self.expected_remaining_execution_time = None;
+                self.expected_remaining_execution_time = Some(eet);
                 println!("panicked at 'overflow when subtracting durations");
             }
         }
@@ -163,6 +164,7 @@ impl SchedulerStatus {
 
 impl Ord for SchedulerStatus {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // self.absolute_deadline.cmp(&other.absolute_deadline)
         match self.absolute_deadline.cmp(&other.absolute_deadline) {
             std::cmp::Ordering::Less => std::cmp::Ordering::Greater,
             std::cmp::Ordering::Equal => std::cmp::Ordering::Equal,
@@ -197,7 +199,7 @@ impl fmt::Display for SchedulerStatus {
         writeln!(f, "running time: {:?}", self.running_time)
     }
 }
-pub(crate) struct Coroutine {
+pub struct Coroutine {
     context: Box<Context>,
     status: CoStatus,
     panicking: Option<&'static str>,
@@ -211,7 +213,7 @@ unsafe impl Sync for Coroutine {}
 unsafe impl Send for Coroutine {}
 
 impl Coroutine {
-    pub(crate) fn new(
+    pub fn new(
         f: Box<dyn FnOnce()>,
         stack_size: StackSize,
         thread_local: bool,
@@ -245,7 +247,7 @@ impl Coroutine {
         co
     }
 
-    pub(crate) fn set_status(&mut self, status: CoStatus) {
+    pub fn set_status(&mut self, status: CoStatus) {
         self.status = status;
     }
 
@@ -253,7 +255,7 @@ impl Coroutine {
         self.status
     }
 
-    pub(crate) fn init(&mut self) {
+    pub fn init(&mut self) {
         let entry = Entry {
             f: Self::main,
             arg: (self as *mut Coroutine) as *mut libc::c_void,
@@ -286,7 +288,7 @@ impl Coroutine {
     // }
 
     /// Resumes coroutine.
-    pub(crate) fn resume(&mut self, sched: &Arc<Scheduler>) -> bool {
+    pub fn resume(&mut self, sched: &Arc<Scheduler>) -> bool {
         // println!("start resume");
         let now = Instant::now();
         self.schedule_status.curr_start_time = Some(now);
@@ -305,7 +307,7 @@ impl Coroutine {
         }
     }
 
-    pub(crate) fn suspend(&mut self, sched: &Arc<Scheduler>) {
+    pub fn suspend(&mut self, sched: &Arc<Scheduler>) {
         // println!("start suspend");
         let now = Instant::now();
         self.schedule_status.update_status(now, self.status);
@@ -329,19 +331,15 @@ impl Coroutine {
     pub fn is_realtime(&self) -> bool {
         self.schedule_status.absolute_deadline.is_some()
     }
+
+    // pub fn set_no_realtime(&mut self) {
+    //     self.schedule_status.absolute_deadline = None;
+    // }
 }
 
 impl Ord for Coroutine {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self
-            .schedule_status
-            .absolute_deadline
-            .cmp(&other.schedule_status.absolute_deadline)
-        {
-            std::cmp::Ordering::Less => std::cmp::Ordering::Greater,
-            std::cmp::Ordering::Equal => std::cmp::Ordering::Equal,
-            std::cmp::Ordering::Greater => std::cmp::Ordering::Less,
-        }
+        self.schedule_status.cmp(&other.schedule_status)
     }
 }
 
@@ -353,7 +351,7 @@ impl PartialOrd for Coroutine {
 
 impl PartialEq for Coroutine {
     fn eq(&self, other: &Self) -> bool {
-        self.schedule_status.absolute_deadline == other.schedule_status.absolute_deadline
+        self.schedule_status == other.schedule_status
     }
 }
 
