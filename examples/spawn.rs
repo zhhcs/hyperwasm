@@ -59,7 +59,15 @@ fn main() {
         Some(std::time::Duration::from_millis(100)),
         Some(std::time::Duration::from_millis(300)),
     );
-    std::thread::sleep(std::time::Duration::from_millis(30));
+    std::thread::sleep(std::time::Duration::from_millis(350));
+
+    rt.spawn(
+        Box::new(move || {
+            do_some_add(0);
+        }),
+        None,
+        None,
+    );
 
     std::thread::sleep(std::time::Duration::from_millis(2_000));
     assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);

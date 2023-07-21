@@ -335,9 +335,9 @@ extern "C" fn signal_handler(signal: libc::c_int) {
         if let Some(current) = current() {
             if unsafe { !current.as_ref().is_realtime() } {
                 let worker = unsafe { get_worker().as_mut() };
+                worker.get_task();
                 if worker.len > 1 {
                     worker.suspend();
-                    worker.get_task();
                     worker.set_curr();
                 }
             }
