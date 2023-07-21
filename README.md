@@ -1,22 +1,29 @@
 # hyper-sched
 仅在Ubuntu 22.04环境下运行，需要root权限
+```
 cargo build --package hyper-scheduler --example spawn 
 sudo ./target/debug/examples/spawn
-
+```
 0. 在设置任务的预期执行时间前先测试该任务在本机环境下的执行时长
 
 1. 建议绑定CPU运行：
    修改内核启动参数
+   ```
         sudo vim /etc/default/grub
+   ```
    隔离CPU0和CPU1
+   ```
         GRUB_CMDLINE_LINUX="isolcpus=0,1"
+   ```
    更新
+   ```
         sudo update-grub
+   ```
    重启后生效
 
-2. 需要开启cgroupV2
+3. 需要开启cgroupV2
    要授权其他控制器，如 cpu cpuset 和 io ，执行以下命令:
-
+```
      sudo mkdir -p /etc/systemd/system/user@.service.d
      cat <<EOF | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
      [Service]
@@ -24,7 +31,7 @@ sudo ./target/debug/examples/spawn
      EOF
 
      sudo systemctl daemon-reload
-
+```
 # 进度安排
 
 第一周（7/3-7/7）：
