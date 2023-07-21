@@ -11,6 +11,15 @@ fn main() {
         Box::new(move || {
             do_some_sub(1);
         }),
+        None,
+        None,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(30));
+
+    rt.spawn(
+        Box::new(move || {
+            do_some_sub(1);
+        }),
         Some(std::time::Duration::from_millis(100)),
         Some(std::time::Duration::from_millis(600)),
     );
@@ -31,6 +40,15 @@ fn main() {
         }),
         Some(std::time::Duration::from_millis(100)),
         Some(std::time::Duration::from_millis(400)),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(30));
+
+    rt.spawn(
+        Box::new(move || {
+            do_some_add(1);
+        }),
+        None,
+        None,
     );
     std::thread::sleep(std::time::Duration::from_millis(30));
 

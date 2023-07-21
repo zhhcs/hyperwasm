@@ -3,6 +3,8 @@
 cargo build --package hyper-scheduler --example spawn 
 sudo ./target/debug/examples/spawn
 
+0. 在设置任务的预期执行时间前先测试该任务在本机环境下的执行时长
+
 1. 建议绑定CPU运行：
    修改内核启动参数
         sudo vim /etc/default/grub
