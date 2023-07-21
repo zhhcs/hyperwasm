@@ -1,12 +1,12 @@
 use super::{get_timer, Scheduler};
 use crate::{
-    task::{current, current_is_none, CoStatus, Coroutine},
+    task::{current, current_is_none, CoStatus, Coroutine, SchedulerStatus},
     StackSize,
 };
 use nix::unistd::Pid;
 use std::{
     cell::Cell,
-    collections::{BinaryHeap, VecDeque},
+    collections::{BinaryHeap, HashMap, VecDeque},
     ptr,
     sync::Arc,
     // time::Instant,
@@ -26,7 +26,8 @@ pub struct Worker {
     new_spawned: ArrayQueue<Box<Coroutine>>,
     local_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
     suspend_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
-    realtime_queue: BinaryHeap<ptr::NonNull<Coroutine>>,
+    realtime_queue: HashMap<u64, ptr::NonNull<Coroutine>>,
+    realtime_status: BinaryHeap<SchedulerStatus>,
     scheduler: Arc<Scheduler>,
     curr: Option<ptr::NonNull<Coroutine>>,
     capacity: usize,
@@ -42,13 +43,15 @@ impl Worker {
         let new_spawned = ArrayQueue::with_capacity(capacity);
         let local_queue = ArrayQueue::with_capacity(capacity);
         let suspend_queue = ArrayQueue::with_capacity(capacity);
-        let realtime_queue = BinaryHeap::with_capacity(capacity);
+        let realtime_queue = HashMap::with_capacity(capacity);
+        let realtime_status = BinaryHeap::with_capacity(capacity);
 
         Arc::new(Worker {
             new_spawned,
             local_queue,
             suspend_queue,
             realtime_queue,
+            realtime_status,
             scheduler: scheduler.clone(),
             curr: None,
             capacity,
@@ -73,7 +76,7 @@ impl Worker {
 
     pub fn set_curr(&mut self) {
         if current_is_none() {
-            if let Some(co) = self.realtime_queue.pop() {
+            if let Some(co) = self.take_realtime() {
                 println!("now setting current {:?}", std::time::Instant::now());
                 self.curr = Some(co);
             } else if let Some(co) = self.local_queue.pop_front() {
@@ -97,11 +100,28 @@ impl Worker {
         false
     }
 
+    pub fn add_realtime(&mut self, co: Box<Coroutine>) {
+        self.realtime_status.push(co.get_schedulestatus());
+        self.realtime_queue
+            .insert(co.get_co_id(), ptr::NonNull::from(Box::leak(Box::new(*co))));
+    }
+
+    pub fn take_realtime(&mut self) -> Option<ptr::NonNull<Coroutine>> {
+        if let Some(stat) = self.realtime_status.pop() {
+            return Some(
+                self.realtime_queue
+                    .remove_entry(&stat.get_co_id())
+                    .unwrap()
+                    .1,
+            );
+        }
+        None
+    }
+
     pub fn get_task(&mut self) {
         while let Some(co) = self.scheduler.pop_realtime() {
             println!("now getting task {:?}", std::time::Instant::now());
-            self.realtime_queue
-                .push(ptr::NonNull::from(Box::leak(Box::new(*co))));
+            self.add_realtime(co);
             self.len += 1;
         }
         while !self.is_full() && self.scheduler.get_length() > 0 {
@@ -149,7 +169,8 @@ impl Worker {
                 curr.set_status(CoStatus::SUSPENDED);
             }
             if curr.is_realtime() {
-                self.realtime_queue.push(curr.into());
+                self.realtime_status.push(curr.get_schedulestatus());
+                self.realtime_queue.insert(curr.get_co_id(), curr.into());
             } else {
                 self.suspend_queue.push_back(curr.into());
             }

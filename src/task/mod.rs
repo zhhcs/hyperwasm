@@ -160,6 +160,10 @@ impl SchedulerStatus {
         }
         self.curr_start_time = None;
     }
+
+    pub fn get_co_id(&self) -> u64 {
+        self.co_id
+    }
 }
 
 impl Ord for SchedulerStatus {
