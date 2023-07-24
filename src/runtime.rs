@@ -5,6 +5,7 @@ use crate::{
 };
 use std::{
     collections::BinaryHeap,
+    panic::{self, AssertUnwindSafe},
     sync::Arc,
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -22,14 +23,21 @@ impl Runtime {
         Runtime { scheduler, threads }
     }
 
-    pub fn spawn(
+    pub fn spawn<F, T>(
         &self,
-        f: Box<dyn FnOnce()>,
+        f: F,
         expected_execution_time: Option<Duration>,
         relative_deadline: Option<Duration>,
-    ) {
+    ) where
+        F: FnOnce() -> T,
+        F: Send + 'static,
+        T: Send + 'static,
+    {
+        let func = Box::new(move || {
+            let _ = panic::catch_unwind(AssertUnwindSafe(f));
+        });
         let co = Coroutine::new(
-            Box::new(move || f()),
+            func,
             StackSize::default(),
             false,
             expected_execution_time,
