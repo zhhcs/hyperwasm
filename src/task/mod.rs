@@ -334,6 +334,7 @@ impl Coroutine {
 
     pub fn is_realtime(&self) -> bool {
         self.schedule_status.absolute_deadline.is_some()
+            && self.schedule_status.expected_execution_time.is_some()
     }
 
     // pub fn set_no_realtime(&mut self) {
