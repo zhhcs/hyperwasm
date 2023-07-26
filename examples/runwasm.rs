@@ -22,10 +22,10 @@ fn run_wasm(rt: &Runtime) -> wasmtime::Result<()> {
     let module = Module::from_file(store.engine(), "examples/add.wat")?;
     let instance = Instance::new(&mut store, &module, &[])?;
 
-    let add = instance.get_typed_func::<(), i32>(&mut store, "add")?;
+    let add = instance.get_typed_func::<i32, i32>(&mut store, "add")?;
 
     let func = move || {
-        if let Ok(res) = add.call(&mut store, ()) {
+        if let Ok(res) = add.call(&mut store, 10000000) {
             NUM.fetch_add(res / 10000000, std::sync::atomic::Ordering::Relaxed);
         }
     };

@@ -1,5 +1,5 @@
 (module
-  (func $add (result i32)
+  (func $add (param $n i32) (result i32)
     (local $i i32)  
     (local.set $i (i32.const 0))
     
@@ -7,7 +7,7 @@
       (loop $loop
         (local.get $i)
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br_if $done (i32.eq (local.get $i) (i32.const 10000000))) 
+        (br_if $done (i32.eq (local.get $i) (local.get $n))) 
         (br $loop)
       )
     )
