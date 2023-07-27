@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
 use wasmtime::{Instance, Module, Store};
 
 use crate::runtime::Runtime;
+
+#[derive(Serialize, Deserialize, Debug)]
 
 pub struct Config {
     path: String,
