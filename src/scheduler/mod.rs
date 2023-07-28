@@ -39,6 +39,13 @@ fn get_timer() -> ptr::NonNull<LocalTimer> {
     TIMER.with(|cell| cell.get()).expect("no timer")
 }
 
+pub fn init_start() {
+    START.with(|cell: &Cell<Option<Instant>>| {
+        assert!(cell.get().is_none());
+        cell.set(Some(Instant::now()));
+    });
+}
+
 pub fn get_start() -> Instant {
     START.with(|cell| cell.get()).expect("no start")
 }
@@ -91,11 +98,13 @@ impl LocalTimer {
     }
 
     pub fn reset_timer(&mut self) {
-        let flags = TimerSetTimeFlags::empty();
-        self.timer
-            .set(self.expiration, flags)
-            .expect("could not set timer");
-        // println!("reset timer");
+        if self.expiration != Expiration::Interval(Duration::from_nanos(0).into()) {
+            let flags = TimerSetTimeFlags::empty();
+            self.timer
+                .set(self.expiration, flags)
+                .expect("could not set timer");
+            // tracing::info!("reset timer");
+        }
     }
 }
 
@@ -128,7 +137,7 @@ impl Scheduler {
     pub fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
         Self::create_cg();
         let scheduler = self.clone();
-        START.with(|cell: &Cell<Option<Instant>>| cell.set(Some(Instant::now())));
+        init_start();
         let t = thread::spawn(move || {
             let pthreadtid = nix::sys::pthread::pthread_self();
             unsafe { PTHREADTID = pthreadtid };
@@ -187,7 +196,7 @@ impl Scheduler {
         while let Ok(slot) = self.slot.try_lock().as_mut() {
             if slot.is_none() {
                 let _ = slot.insert(co);
-                // println!("slot inserted {:?}", Instant::now());
+                // tracing::info!("slot inserted {:?}", Instant::now());
                 break;
             }
         }
@@ -195,7 +204,7 @@ impl Scheduler {
 
     pub fn get_slot(&self) -> Option<Box<Coroutine>> {
         if let Ok(slot) = self.slot.try_lock().as_mut() {
-            // println!("try_get_slot");
+            // tracing::info!("try_get_slot");
             slot.take()
         } else {
             None
@@ -204,12 +213,12 @@ impl Scheduler {
 
     pub fn push(&self, co: Box<Coroutine>, realtime: bool) -> Result<(), std::io::Error> {
         if realtime {
-            if let Ok(q) = self.realtime_queue.try_lock().as_mut() {
+            while let Ok(q) = self.realtime_queue.try_lock().as_mut() {
                 q.push(co);
                 return Ok(());
             }
         } else {
-            if let Ok(q) = self.global_queue.try_lock().as_mut() {
+            while let Ok(q) = self.global_queue.try_lock().as_mut() {
                 q.push_back(co);
                 return Ok(());
             }
@@ -222,8 +231,9 @@ impl Scheduler {
     }
 
     pub fn cancell(&self, co: Box<Coroutine>) {
-        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
+        while let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
             q.push_back(co);
+            break;
         }
     }
 
@@ -316,10 +326,10 @@ extern "C" fn signal_handler(signal: libc::c_int) {
             // let start = Instant::now();
             worker.suspend();
             // let end = Instant::now();
-            // println!("time cost: {:?}", end - start);
+            // tracing::info!("time cost: {:?}", end - start);
         };
         unsafe { get_timer().as_mut() }.reset_timer();
-        // println!("now suspended {:?}", Instant::now());
+        // tracing::info!("now suspended {:?}", Instant::now());
 
         unsafe {
             libc::sigemptyset(&mut mask);

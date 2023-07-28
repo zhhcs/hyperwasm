@@ -61,8 +61,7 @@ sudo ./target/debug/examples/spawn
 2. 错误处理。
 0. (暂时不做)处理任务共享资源：设计并实现对任务共享资源的管理和调度，确保任务能够正确地访问和利用共享资源。
 
-TODO: client、server 
-      axum
+TODO: name和id对应
 
 # fix
 FIXME1: 在其他线程生成的coroutine，如果已经生成上下文，那么当前worker获取这个coroutine并运行就会panic

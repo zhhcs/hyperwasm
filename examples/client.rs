@@ -1,28 +1,21 @@
-use std::{process::exit, sync::Arc};
+use hyper_scheduler::axum::client::Client;
+use hyper_scheduler::runwasm::Config;
 
-use hyper_scheduler::{
-    runtime::Runtime,
-    runwasm::{run_wasm, Config},
-};
-
-fn main() {
+// cargo build --package hyper-scheduler --example client
+//
+#[tokio::main]
+async fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing::Level::TRACE)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
-    let rt = Arc::new(Runtime::new());
-
+    let client = Client::new();
     let config = Config::new(
         "/home/ubuntu/dev/hyper-scheduler/examples/add.wat",
         12,
         20,
         "add",
     );
-
-    let _ = run_wasm(&rt, config);
-
-    std::thread::sleep(std::time::Duration::from_millis(2_000));
-    rt.print_completed_status();
-    exit(0);
+    client.start(&config).await.unwrap();
 }

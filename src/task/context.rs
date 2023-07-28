@@ -59,7 +59,7 @@ impl Context {
 
     pub fn switch(&self, backup: &mut Context) {
         let rc = unsafe { swapcontext(&mut backup.context, &self.context) };
-        // println!("context switched");
+        // tracing::info!("context switched");
         if rc != 0 {
             panic!("swapcontext returns {}", rc);
         }

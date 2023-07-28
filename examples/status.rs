@@ -9,6 +9,11 @@ use hyper_scheduler::runtime::Runtime;
 pub use hyper_scheduler::task::{stack::StackSize, Coroutine};
 
 fn main() {
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(tracing::Level::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    tracing::info!("Starting");
     let rt: Arc<Runtime> = Arc::new(Runtime::new());
     let mut queue = BinaryHeap::new();
     for i in 0..5 {
@@ -24,7 +29,7 @@ fn main() {
         queue.push(ptr::NonNull::from(Box::leak(Box::new(*co))));
     }
     while let Some(co) = queue.pop() {
-        println!("{}", unsafe { co.as_ref() }.get_schedulestatus());
+        tracing::info!("{}", unsafe { co.as_ref() }.get_schedulestatus());
     }
 
     let mut map = HashMap::new();
@@ -43,7 +48,7 @@ fn main() {
         map.insert(co.get_co_id(), ptr::NonNull::from(Box::leak(Box::new(*co))));
     }
     while let Some(co) = heap.pop() {
-        println!(
+        tracing::info!(
             "{}",
             unsafe { map.get(&co.get_co_id()).unwrap().as_ref() }.get_schedulestatus()
         );

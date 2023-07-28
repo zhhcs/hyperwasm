@@ -3,7 +3,7 @@ use std::alloc;
 
 /// StackSize specifies desired stack size for new task.
 ///
-/// It defaults to `8` times page size or [libc::MINSIGSTKSZ] depending on which one is bigger.
+/// It defaults to `16` times page size or [libc::MINSIGSTKSZ] depending on which one is bigger.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct StackSize {
     size: isize,
@@ -17,8 +17,8 @@ impl StackSize {
 
     fn aligned_page_size(&self) -> usize {
         let size = match self.size {
-            0 => 8 * page_size::get(),
-            1.. => 8 * page_size::get() + Self::align_to_page_size(self.size as usize),
+            0 => 16 * page_size::get(),
+            1.. => 16 * page_size::get() + Self::align_to_page_size(self.size as usize),
             _ => Self::align_to_page_size((-self.size) as usize),
         };
         size.max(libc::MINSIGSTKSZ)

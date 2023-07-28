@@ -73,7 +73,7 @@ impl Controllerv2 {
         if self.get_path().exists() {
             if let Ok(_) = fs::remove_dir(self.get_path()) {}
             //  else {
-            //     println!("delete failed: {:?}", self.get_path());
+            //     tracing::info!("delete failed: {:?}", self.get_path());
             // };
         }
     }

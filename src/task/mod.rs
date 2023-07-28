@@ -61,7 +61,7 @@ impl Scope {
 
 impl Drop for Scope {
     fn drop(&mut self) {
-        // println!("scope dropped");
+        // tracing::info!("scope dropped");
         COROUTINE.with(|cell| {
             let co = cell.replace(None).expect("no running coroutine");
             assert!(co == self.co, "running coroutine changed");
@@ -144,7 +144,7 @@ impl SchedulerStatus {
                 self.expected_remaining_execution_time = Some(eet - self.running_time);
             } else {
                 self.expected_remaining_execution_time = Some(eet);
-                println!("panicked at 'overflow when subtracting durations");
+                tracing::warn!("id = {} out of expected execution time", self.get_co_id());
             }
         }
     }
@@ -204,7 +204,7 @@ impl fmt::Display for SchedulerStatus {
     }
 }
 pub struct Coroutine {
-    context: Box<Context>,
+    context: Option<Box<Context>>,
     status: CoStatus,
     panicking: Option<&'static str>,
     f: Option<Box<dyn FnOnce()>>,
@@ -216,6 +216,7 @@ pub struct Coroutine {
 unsafe impl Sync for Coroutine {}
 unsafe impl Send for Coroutine {}
 
+#[allow(invalid_value)]
 impl Coroutine {
     pub fn new(
         f: Box<dyn FnOnce()>,
@@ -224,10 +225,10 @@ impl Coroutine {
         expected_execution_time: Option<Duration>,
         relative_deadline: Option<Duration>,
     ) -> Box<Coroutine> {
-        #[allow(invalid_value)]
         let mut co = Box::new(Coroutine {
             f: Option::Some(f),
-            context: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+            context: None,
+            // context: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             status: CoStatus::PENDING,
             panicking: None,
             id: get_id(),
@@ -243,7 +244,11 @@ impl Coroutine {
                 arg: (co.as_mut() as *mut Coroutine) as *mut libc::c_void,
                 stack_size,
             };
-            mem::forget(mem::replace(&mut co.context, Context::new(&entry, None)));
+            co.context = Some(unsafe { mem::MaybeUninit::zeroed().assume_init() });
+            mem::forget(mem::replace(
+                &mut co.context,
+                Some(Context::new(&entry, None)),
+            ));
             co.status = CoStatus::READY;
             co.schedule_status
                 .update_status(Instant::now(), CoStatus::READY);
@@ -265,7 +270,11 @@ impl Coroutine {
             arg: (self as *mut Coroutine) as *mut libc::c_void,
             stack_size: self.stack_size,
         };
-        mem::forget(mem::replace(&mut self.context, Context::new(&entry, None)));
+        self.context = Some(unsafe { mem::MaybeUninit::zeroed().assume_init() });
+        mem::forget(mem::replace(
+            &mut self.context,
+            Some(Context::new(&entry, None)),
+        ));
         self.set_status(CoStatus::READY);
         let now = Instant::now();
         self.schedule_status.update_status(now, self.status);
@@ -293,7 +302,7 @@ impl Coroutine {
 
     /// Resumes coroutine.
     pub fn resume(&mut self, sched: &Arc<Scheduler>) -> bool {
-        // println!("start resume");
+        // tracing::info!("start resume");
         let now = Instant::now();
         self.schedule_status.curr_start_time = Some(now);
         self.status = CoStatus::RUNNING;
@@ -303,7 +312,9 @@ impl Coroutine {
 
         let _scope = Scope::enter(self);
 
-        ThisThread::resume(&self.context);
+        if let Some(context) = &self.context {
+            ThisThread::resume(&context);
+        };
 
         match self.status {
             CoStatus::COMPLETED => false,
@@ -312,13 +323,16 @@ impl Coroutine {
     }
 
     pub fn suspend(&mut self, sched: &Arc<Scheduler>) {
-        // println!("start suspend");
+        // tracing::info!("start suspend");
         let now = Instant::now();
         self.schedule_status.update_status(now, self.status);
         self.schedule_status.update_running_time(now);
         self.schedule_status.update_remaining();
         sched.update_status(self.get_co_id(), self.get_schedulestatus());
-        ThisThread::suspend(&mut self.context);
+        if let Some(context) = &mut self.context {
+            ThisThread::suspend(context);
+        };
+
         if let Some(msg) = self.panicking {
             panic::panic_any(msg);
         }

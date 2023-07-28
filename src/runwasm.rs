@@ -37,8 +37,9 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
     let name = instance.get_typed_func::<i32, i32>(&mut store, &config.name)?;
 
     let func = move || {
-        if let Ok(res) = name.call(&mut store, 10000000) {
-            println!("res: {}", res);
+        if let Ok(_) = name.call(&mut store, 10000000) {
+        } else {
+            tracing::info!("run wasm error");
         }
     };
 

@@ -43,11 +43,14 @@ impl Runtime {
             expected_execution_time,
             relative_deadline,
         );
-
         let stat = co.get_schedulestatus();
         if !co.is_realtime() {
+            // tracing::info!("case 0");
             self.scheduler.update_status(co.get_co_id(), stat);
-            self.scheduler.push(co, false).unwrap();
+            if let Ok(()) = self.scheduler.push(co, false) {
+            } else {
+                tracing::error!("spawn failed");
+            };
         } else {
             match self.is_schedulable(&stat) {
                 AdmissionControll::PREEMPTIVE => {
@@ -64,13 +67,16 @@ impl Runtime {
                         )
                     };
                     assert!(ret == 0);
-                    // println!("send signal {:?}", Instant::now());
                 }
                 AdmissionControll::SCHEDULABLE => {
                     self.scheduler.update_status(co.get_co_id(), stat);
-                    self.scheduler.push(co, true).unwrap();
+                    if let Ok(()) = self.scheduler.push(co, true) {
+                    } else {
+                        tracing::error!("spawn failed");
+                    };
                 }
                 AdmissionControll::UNSCHEDULABLE => {
+                    tracing::warn!("id = {} spawn failed, cause: UNSCHEDULABLE", co.get_co_id());
                     self.scheduler.cancell(co);
                 }
             };
@@ -80,7 +86,7 @@ impl Runtime {
     fn is_schedulable(&self, co_stat: &SchedulerStatus) -> AdmissionControll {
         if let Some(mut status_map) = self.scheduler.get_status() {
             if status_map.is_empty() {
-                // println!("case 1");
+                // tracing::info!("case 1");
                 return AdmissionControll::SCHEDULABLE;
             }
             let curr: u64 = self.scheduler.get_curr_running_id();
@@ -93,7 +99,7 @@ impl Runtime {
                     curr_stat.expected_remaining_execution_time = Some(eret);
                 });
             } else {
-                // println!("case 2");
+                // tracing::info!("case 2");
                 return AdmissionControll::PREEMPTIVE;
             }
 
@@ -114,25 +120,25 @@ impl Runtime {
                         (s.absolute_deadline.unwrap() - start).as_micros() as i128 as f64;
                     let util = total_remaining / deadline;
                     if util > 1.0 {
-                        // println!("case 3");
+                        // tracing::info!("case 3");
                         return AdmissionControll::UNSCHEDULABLE;
                     }
                 }
             }
 
             if stat_vec.peek().unwrap().eq(&co_stat) {
-                // println!("case 4");
+                // tracing::info!("case 4");
                 return AdmissionControll::PREEMPTIVE;
             }
         }
-        // println!("case 5");
+        // tracing::info!("case 5");
         AdmissionControll::SCHEDULABLE
     }
 
     pub fn print_completed_status(&self) {
         let s = self.scheduler.get_completed_status().unwrap();
         s.iter().for_each(|(id, stat)| {
-            println!("id: {}, status: \n{}", id, stat);
+            tracing::info!("id: {}, status: \n{}", id, stat);
         });
     }
 }

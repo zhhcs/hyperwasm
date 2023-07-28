@@ -77,7 +77,7 @@ impl Worker {
     pub fn set_curr(&mut self) {
         if current_is_none() {
             if let Some(co) = self.take_realtime() {
-                // println!("now setting current {:?}", std::time::Instant::now());
+                // tracing::info!("now setting current {:?}", std::time::Instant::now());
                 self.curr = Some(co);
             } else if let Some(co) = self.local_queue.pop_front() {
                 self.curr = Some(co);
@@ -92,7 +92,7 @@ impl Worker {
 
     pub fn preemptive(&mut self) -> bool {
         while let Some(co) = self.scheduler.get_slot() {
-            // println!("{} preempt", co.get_co_id());
+            // tracing::info!("{} preempt", co.get_co_id());
             self.curr = Some(ptr::NonNull::from(Box::leak(Box::new(*co))));
             self.len += 1;
             return true;
@@ -120,13 +120,13 @@ impl Worker {
 
     pub fn get_task(&mut self) {
         while let Some(co) = self.scheduler.pop_realtime() {
-            // println!("now getting task {:?}", std::time::Instant::now());
+            // tracing::info!("now getting task {:?}", std::time::Instant::now());
             self.add_realtime(co);
             self.len += 1;
         }
         while !self.is_full() && self.scheduler.get_length() > 0 {
             if let Some(co) = self.scheduler.pop() {
-                // println!("get coroutine co id = {} from global queue", co.get_co_id());
+                // tracing::info!("get coroutine co id = {} from global queue", co.get_co_id());
                 self.new_spawned.push_back(co);
                 self.len += 1;
             }
@@ -146,7 +146,7 @@ impl Worker {
                         co.init();
                     }
                     // let id = co.get_co_id();
-                    // println!(
+                    // tracing::info!(
                     //     "now {:?} co id = {} is ready to run",
                     //     std::time::Instant::now(),
                     //     id
@@ -184,11 +184,11 @@ impl Worker {
         let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
         self.local_queue.push_back(co);
         self.len += 1;
-        println!("spawning local coroutine");
+        tracing::info!("spawning local coroutine");
     }
 
     fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>) {
-        // println!("running coroutine");
+        // tracing::info!("running coroutine");
         let c = unsafe { co.as_mut() };
         if c.resume(&self.scheduler) {
             return;
@@ -200,7 +200,7 @@ impl Worker {
     }
 
     fn drop_coroutine(co: ptr::NonNull<Coroutine>) {
-        // println!("dropping coroutine");
+        // tracing::info!("dropping coroutine");
         drop(unsafe { Box::from_raw(co.as_ptr()) });
         unsafe { get_timer().as_mut().reset_timer() };
     }
