@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     runtime::Runtime,
-    runwasm::{run_wasm, Config},
+    runwasm::{get_status_by_name, run_wasm, Config},
 };
 use axum::{routing::get, Json, Router};
 
@@ -14,7 +14,10 @@ pub struct Server {}
 impl Server {
     pub async fn start() {
         RUNTIME.as_ref();
-        let app = Router::new().route("/", get(Self::handler));
+        let app = Router::new()
+            .route("/", get(Self::handler))
+            .route("/status", get(Self::get_status))
+            .route("/uname", get(Self::get_status_by_name));
 
         tracing::info!("listening on 0.0.0.0:3000");
         axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
@@ -38,8 +41,20 @@ impl Server {
         }
     }
 
-    pub fn get_status() {
-        RUNTIME.print_completed_status();
+    async fn get_status() -> &'static str {
+        if let Some(status) = RUNTIME.get_status() {
+            status.iter().for_each(|(id, stat)| {
+                tracing::info!("\nid: {}, status: \n{}", id, stat);
+            });
+        };
+        "000"
+    }
+
+    async fn get_status_by_name(Json(uname): Json<String>) -> &'static str {
+        if let Some(status) = get_status_by_name(&RUNTIME, &uname) {
+            tracing::info!("\nuname: {} \n{}", uname, status)
+        };
+        "111"
     }
 }
 

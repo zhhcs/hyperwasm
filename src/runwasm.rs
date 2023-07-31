@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, fmt};
 use serde::{Deserialize, Serialize};
 use wasmtime::{Instance, Module, Store};
 
-use crate::runtime::Runtime;
+use crate::{runtime::Runtime, task::SchedulerStatus};
 
 thread_local! {
     static MAP : RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
@@ -69,6 +69,14 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
         Ok(())
     } else {
         Err(wasmtime::Error::msg("failed to spawn"))
+    }
+}
+
+pub fn get_status_by_name(rt: &Runtime, unique_name: &str) -> Option<SchedulerStatus> {
+    if let Some(id) = MAP.with(|map| map.borrow().get(unique_name).cloned()) {
+        rt.get_status_by_id(id)
+    } else {
+        None
     }
 }
 

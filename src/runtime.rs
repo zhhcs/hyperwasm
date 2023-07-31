@@ -4,7 +4,7 @@ use crate::{
     StackSize,
 };
 use std::{
-    collections::BinaryHeap,
+    collections::{BTreeMap, BinaryHeap},
     panic::{self, AssertUnwindSafe},
     sync::Arc,
     thread::JoinHandle,
@@ -161,6 +161,14 @@ impl Runtime {
         }
         // tracing::info!("case 5");
         AdmissionControll::SCHEDULABLE
+    }
+
+    pub fn get_status_by_id(&self, id: u64) -> Option<SchedulerStatus> {
+        self.scheduler.get_status_by_id(id)
+    }
+
+    pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+        self.scheduler.get_status()
     }
 
     pub fn print_completed_status(&self) {

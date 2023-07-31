@@ -203,7 +203,7 @@ impl Scheduler {
     }
 
     pub fn get_slot(&self) -> Option<Box<Coroutine>> {
-        if let Ok(slot) = self.slot.try_lock().as_mut() {
+        if let Ok(slot) = self.slot.lock().as_mut() {
             // tracing::info!("try_get_slot");
             slot.take()
         } else {
@@ -213,12 +213,12 @@ impl Scheduler {
 
     pub fn push(&self, co: Box<Coroutine>, realtime: bool) -> Result<(), std::io::Error> {
         if realtime {
-            while let Ok(q) = self.realtime_queue.try_lock().as_mut() {
+            if let Ok(q) = self.realtime_queue.lock().as_mut() {
                 q.push(co);
                 return Ok(());
             }
         } else {
-            while let Ok(q) = self.global_queue.try_lock().as_mut() {
+            if let Ok(q) = self.global_queue.lock().as_mut() {
                 q.push_back(co);
                 return Ok(());
             }
@@ -231,9 +231,8 @@ impl Scheduler {
     }
 
     pub fn cancell(&self, co: Box<Coroutine>) {
-        while let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
+        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
             q.push_back(co);
-            break;
         }
     }
 
@@ -262,13 +261,13 @@ impl Scheduler {
     }
 
     pub fn update_status(&self, co_id: u64, stat: SchedulerStatus) {
-        if let Ok(status) = self.co_status.try_lock().as_mut() {
+        if let Ok(status) = self.co_status.lock().as_mut() {
             status.insert(co_id, stat);
         }
     }
 
     fn delete_status(&self, co_id: u64) {
-        if let Ok(status) = self.co_status.try_lock().as_mut() {
+        if let Ok(status) = self.co_status.lock().as_mut() {
             status.remove(&co_id);
         }
     }
@@ -276,6 +275,18 @@ impl Scheduler {
     pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
         if let Ok(status) = self.co_status.try_lock().as_mut() {
             return Some(status.clone());
+        }
+        None
+    }
+
+    pub fn get_status_by_id(&self, id: u64) -> Option<SchedulerStatus> {
+        if let Ok(status) = self.co_status.try_lock() {
+            if status.contains_key(&id) {
+                return status.get(&id).cloned();
+            }
+        }
+        if let Ok(status) = self.completed_status.try_lock() {
+            return status.get(&id).cloned();
         }
         None
     }
@@ -288,7 +299,7 @@ impl Scheduler {
     }
 
     pub fn update_completed_status(&self, co_id: u64, stat: SchedulerStatus) {
-        if let Ok(status) = self.completed_status.try_lock().as_mut() {
+        if let Ok(status) = self.completed_status.lock().as_mut() {
             status.insert(co_id, stat);
         }
         self.delete_status(co_id);
