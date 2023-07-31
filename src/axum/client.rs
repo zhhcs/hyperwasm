@@ -16,7 +16,7 @@ impl Client {
     pub async fn start(&self, config: &Config) -> Result<(), reqwest::Error> {
         let json = serde_json::to_string(config).unwrap();
 
-        for _ in 0..16 {
+        for _ in 0..2 {
             let resp = self
                 .client
                 .get("http://127.0.0.1:3000")
@@ -28,7 +28,7 @@ impl Client {
             let body = resp.text().await?;
 
             tracing::info!("Response: {}", body);
-            thread::sleep(Duration::from_millis(15));
+            thread::sleep(Duration::from_millis(10));
         }
 
         Ok(())

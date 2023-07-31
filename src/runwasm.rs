@@ -1,11 +1,17 @@
+use std::{cell::RefCell, collections::HashMap, fmt};
+
 use serde::{Deserialize, Serialize};
 use wasmtime::{Instance, Module, Store};
 
 use crate::runtime::Runtime;
 
-#[derive(Serialize, Deserialize, Debug)]
+thread_local! {
+    static MAP : RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
+}
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
+    unique_name: String,
     path: String,
     expected_execution_time: u64,
     relative_deadline: u64,
@@ -15,12 +21,14 @@ pub struct Config {
 
 impl Config {
     pub fn new(
+        unique_name: &str,
         path: &str,
         expected_execution_time: u64,
         relative_deadline: u64,
         name: &str,
     ) -> Config {
         Config {
+            unique_name: unique_name.to_string(),
             path: path.to_string(),
             expected_execution_time,
             relative_deadline,
@@ -30,6 +38,9 @@ impl Config {
 }
 
 pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
+    if MAP.with(|map| map.borrow().contains_key(config.unique_name.as_str())) {
+        return Err(wasmtime::Error::msg("need unique name").context("need unique name"));
+    }
     let mut store = Store::<()>::default();
     let module = Module::from_file(store.engine(), config.path)?;
     let instance = Instance::new(&mut store, &module, &[])?;
@@ -39,7 +50,7 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
     let func = move || {
         if let Ok(_) = name.call(&mut store, 10000000) {
         } else {
-            tracing::info!("run wasm error");
+            tracing::warn!("run wasm error");
         }
     };
 
@@ -52,7 +63,21 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
         relative_deadline = Some(std::time::Duration::from_millis(config.relative_deadline));
     }
 
-    rt.spawn(func, expected_execution_time, relative_deadline);
+    let id = rt.spawn(func, expected_execution_time, relative_deadline);
+    if let Ok(id) = id {
+        MAP.with(|map| map.borrow_mut().insert(config.unique_name, id));
+        Ok(())
+    } else {
+        Err(wasmtime::Error::msg("failed to spawn"))
+    }
+}
 
-    Ok(())
+impl fmt::Display for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "expected_execution_time: {:?}, relative_deadline: {:?}",
+            self.expected_execution_time, self.relative_deadline
+        )
+    }
 }

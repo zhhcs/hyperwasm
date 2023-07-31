@@ -28,7 +28,8 @@ impl Runtime {
         f: F,
         expected_execution_time: Option<Duration>,
         relative_deadline: Option<Duration>,
-    ) where
+    ) -> Result<u64, std::io::Error>
+    where
         F: FnOnce() -> T,
         F: Send + 'static,
         T: Send + 'static,
@@ -44,12 +45,17 @@ impl Runtime {
             relative_deadline,
         );
         let stat = co.get_schedulestatus();
+        let id = co.get_co_id();
         if !co.is_realtime() {
             // tracing::info!("case 0");
-            self.scheduler.update_status(co.get_co_id(), stat);
             if let Ok(()) = self.scheduler.push(co, false) {
+                self.scheduler.update_status(id, stat);
             } else {
                 tracing::error!("spawn failed");
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "spawn failed",
+                ));
             };
         } else {
             match self.is_schedulable(&stat) {
@@ -69,34 +75,55 @@ impl Runtime {
                     assert!(ret == 0);
                 }
                 AdmissionControll::SCHEDULABLE => {
-                    self.scheduler.update_status(co.get_co_id(), stat);
                     if let Ok(()) = self.scheduler.push(co, true) {
+                        self.scheduler.update_status(id, stat);
                     } else {
                         tracing::error!("spawn failed");
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "spawn failed",
+                        ));
                     };
                 }
                 AdmissionControll::UNSCHEDULABLE => {
                     tracing::warn!("id = {} spawn failed, cause: UNSCHEDULABLE", co.get_co_id());
                     self.scheduler.cancell(co);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "spawn failed",
+                    ));
                 }
             };
         }
+        Ok(id)
     }
 
     fn is_schedulable(&self, co_stat: &SchedulerStatus) -> AdmissionControll {
-        if let Some(mut status_map) = self.scheduler.get_status() {
+        while let Some(mut status_map) = self.scheduler.get_status() {
             if status_map.is_empty() {
                 // tracing::info!("case 1");
                 return AdmissionControll::SCHEDULABLE;
             }
             let curr: u64 = self.scheduler.get_curr_running_id();
-            let start = status_map.get(&curr).unwrap().curr_start_time.unwrap();
+
+            let running = status_map.get(&curr);
+            if running.is_none() {
+                drop(status_map);
+                continue;
+            }
+            let start = running.unwrap().curr_start_time.unwrap();
             let now = Instant::now();
             if status_map.get(&curr).unwrap().absolute_deadline.is_some() {
                 status_map.entry(curr).and_modify(|curr_stat| {
                     let mut eret = curr_stat.expected_remaining_execution_time.unwrap();
-                    eret -= now - start;
-                    curr_stat.expected_remaining_execution_time = Some(eret);
+                    let time_diff = now - start;
+                    if eret > time_diff {
+                        eret -= time_diff;
+                        curr_stat.expected_remaining_execution_time = Some(eret);
+                    } else {
+                        curr_stat.expected_remaining_execution_time =
+                            Some(std::time::Duration::from_millis(0));
+                    }
                 });
             } else {
                 // tracing::info!("case 2");
@@ -130,6 +157,7 @@ impl Runtime {
                 // tracing::info!("case 4");
                 return AdmissionControll::PREEMPTIVE;
             }
+            break;
         }
         // tracing::info!("case 5");
         AdmissionControll::SCHEDULABLE

@@ -14,6 +14,7 @@ fn main() {
     let rt = Arc::new(Runtime::new());
 
     let config = Config::new(
+        "task1",
         "/home/ubuntu/dev/hyper-scheduler/examples/add.wat",
         12,
         20,

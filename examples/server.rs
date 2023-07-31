@@ -6,14 +6,14 @@ use hyper_scheduler::axum::server::Server;
 // RUST_LOG=info sudo ./target/debug/examples/server
 fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(tracing::Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
     thread::spawn(move || {
         hyper_scheduler::init_start();
         loop {
-            thread::sleep(Duration::from_secs(10));
+            thread::sleep(Duration::from_secs(60));
             Server::get_status();
         }
     });

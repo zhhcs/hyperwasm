@@ -13,6 +13,7 @@ pub struct Server {}
 
 impl Server {
     pub async fn start() {
+        RUNTIME.as_ref();
         let app = Router::new().route("/", get(Self::handler));
 
         tracing::info!("listening on 0.0.0.0:3000");
@@ -24,8 +25,17 @@ impl Server {
 
     async fn handler(Json(config): Json<Config>) -> &'static str {
         tracing::info!("Received a request");
-        run_wasm(&RUNTIME, config).unwrap();
-        "Hello, World!"
+        tracing::info!("{}", config);
+        match run_wasm(&RUNTIME, config) {
+            Ok(_) => "new task spawned",
+            Err(err) => {
+                if err.to_string() == "need unique name" {
+                    "need unique name"
+                } else {
+                    "failed to spawn"
+                }
+            }
+        }
     }
 
     pub fn get_status() {

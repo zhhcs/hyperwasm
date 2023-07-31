@@ -12,7 +12,7 @@ fn main() {
     tracing::info!("Starting");
     let rt = Arc::new(Runtime::new());
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_sub(1);
         },
@@ -21,7 +21,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_sub(1);
         },
@@ -30,7 +30,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_add(2);
         },
@@ -39,7 +39,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_sub(3);
         },
@@ -48,7 +48,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_add(1);
         },
@@ -57,7 +57,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_add(2);
         },
@@ -66,7 +66,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_add(2);
         },
@@ -75,7 +75,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(110));
 
-    rt.spawn(
+    let _ = rt.spawn(
         move || {
             do_some_add(0);
         },
