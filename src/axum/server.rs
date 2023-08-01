@@ -28,7 +28,7 @@ impl Server {
     }
 
     async fn handler(Json(config): Json<Config>) -> String {
-        tracing::info!("Received a request");
+        tracing::trace!("Received a request");
         // tracing::info!("{}", config);
         match run_wasm(&RUNTIME, config) {
             Ok(_) => "new task spawned".to_string(),

@@ -1,8 +1,8 @@
 # hyper-sched
 仅在Ubuntu 22.04环境下运行，需要root权限
 ```
-cargo build --package hyper-scheduler --example spawn 
-sudo ./target/debug/examples/spawn
+cargo build --release --package hyper-scheduler --example server 
+sudo ./target/release/examples/server
 ```
 0. 在设置任务的预期执行时间前先测试该任务在本机环境下的执行时长
 

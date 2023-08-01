@@ -1,7 +1,8 @@
 use hyper_scheduler::axum::server::Server;
 
-// cargo build --package hyper-scheduler --example server
-// RUST_LOG=info sudo ./target/debug/examples/server
+// cargo build --release --package hyper-scheduler --example server
+// sudo ./target/release/examples/server
+// http://127.0.0.1:3000/status
 fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing::Level::INFO)
