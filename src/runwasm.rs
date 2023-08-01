@@ -64,20 +64,25 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
     }
 
     let id = rt.spawn(func, expected_execution_time, relative_deadline);
-    if let Ok(id) = id {
-        MAP.with(|map| map.borrow_mut().insert(config.unique_name, id));
-        Ok(())
-    } else {
-        Err(wasmtime::Error::msg("failed to spawn"))
+    match id {
+        Ok(id) => {
+            MAP.with(|map| map.borrow_mut().insert(config.unique_name, id));
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
     }
 }
 
 pub fn get_status_by_name(rt: &Runtime, unique_name: &str) -> Option<SchedulerStatus> {
     if let Some(id) = MAP.with(|map| map.borrow().get(unique_name).cloned()) {
-        rt.get_status_by_id(id)
-    } else {
-        None
+        if let Some(mut status) = rt.get_status_by_id(id) {
+            if let Some(start) = status.curr_start_time {
+                status.running_time += std::time::Instant::now() - start;
+            }
+            return Some(status);
+        }
     }
+    None
 }
 
 impl fmt::Display for Config {

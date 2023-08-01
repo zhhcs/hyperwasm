@@ -81,7 +81,7 @@ impl Runtime {
                         tracing::error!("spawn failed");
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::Other,
-                            "spawn failed",
+                            "spawn failed, unexpected error",
                         ));
                     };
                 }
@@ -90,7 +90,7 @@ impl Runtime {
                     self.scheduler.cancell(co);
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
-                        "spawn failed",
+                        "spawn failed, cause: UNSCHEDULABLE",
                     ));
                 }
             };
@@ -176,6 +176,10 @@ impl Runtime {
         s.iter().for_each(|(id, stat)| {
             tracing::info!("id: {}, status: \n{}", id, stat);
         });
+    }
+
+    pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+        self.scheduler.get_completed_status()
     }
 }
 

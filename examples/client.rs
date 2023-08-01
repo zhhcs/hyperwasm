@@ -11,12 +11,19 @@ async fn main() {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
     let client = Client::new();
-    let config = Config::new(
-        "task1",
-        "/home/ubuntu/dev/hyper-scheduler/examples/add.wat",
-        12,
-        20,
-        "add",
-    );
-    client.start(&config).await.unwrap();
+    for i in 1..6 {
+        let mut name = String::from("task");
+        name.push_str(&i.to_string());
+        let config = Config::new(
+            &name,
+            "/home/ubuntu/dev/hyper-scheduler/examples/add.wat",
+            12,
+            20,
+            "add",
+        );
+        client.spawn(&config).await.unwrap();
+    }
+    client.get_status().await.unwrap();
+    client.get_status_by_name("task1").await.unwrap();
+    client.get_completed_status().await.unwrap();
 }

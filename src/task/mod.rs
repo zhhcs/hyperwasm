@@ -97,9 +97,9 @@ impl ThisThread {
 pub struct SchedulerStatus {
     status: BTreeMap<Instant, CoStatus>,
     co_id: u64,
-    co_status: CoStatus,
+    pub co_status: CoStatus,
     pub curr_start_time: Option<Instant>,
-    running_time: Duration,
+    pub running_time: Duration,
 
     spawn_time: Instant,
     expected_execution_time: Option<Duration>,
@@ -194,11 +194,15 @@ impl Eq for SchedulerStatus {}
 impl fmt::Display for SchedulerStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let start = crate::scheduler::get_start();
-        self.status
-            .iter()
-            .for_each(|(time, stat)| writeln!(f, "{:?}, {:?}", *time - start, stat).unwrap());
+        self.status.iter().for_each(|(time, stat)| {
+            let duration = *time - start.0;
+            let time = start.1 + chrono::Duration::from_std(duration).unwrap();
+            writeln!(f, "{}, {:?}", time.to_string(), stat).unwrap()
+        });
         if let Some(deadline) = self.absolute_deadline {
-            writeln!(f, "deadline {:?}", deadline - start).unwrap();
+            let duration = deadline - start.0;
+            let time = start.1 + chrono::Duration::from_std(duration).unwrap();
+            writeln!(f, "{}, deadline", time).unwrap();
         }
         writeln!(f, "running time: {:?}", self.running_time)
     }

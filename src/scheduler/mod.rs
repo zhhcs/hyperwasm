@@ -3,6 +3,7 @@ use crate::{
     scheduler::worker::{get_worker, Worker},
     task::{current, Coroutine, SchedulerStatus},
 };
+use chrono::{DateTime, Local};
 use nix::{
     sys::{
         signal::{self, SigEvent, SigHandler, SigevNotify, Signal},
@@ -32,7 +33,7 @@ pub static mut PTHREADTID: nix::sys::pthread::Pthread = 0;
 
 thread_local! {
     static TIMER: Cell<Option<ptr::NonNull<LocalTimer>>> = Cell::new(None);
-    static START: Cell<Option<Instant>> = Cell::new(None);
+    static START: Cell<Option<(Instant, DateTime<Local>)>> = Cell::new(None);
 }
 
 fn get_timer() -> ptr::NonNull<LocalTimer> {
@@ -40,13 +41,13 @@ fn get_timer() -> ptr::NonNull<LocalTimer> {
 }
 
 pub fn init_start() {
-    START.with(|cell: &Cell<Option<Instant>>| {
+    START.with(|cell| {
         assert!(cell.get().is_none());
-        cell.set(Some(Instant::now()));
+        cell.set(Some((Instant::now(), Local::now())));
     });
 }
 
-pub fn get_start() -> Instant {
+pub fn get_start() -> (Instant, DateTime<Local>) {
     START.with(|cell| cell.get()).expect("no start")
 }
 
