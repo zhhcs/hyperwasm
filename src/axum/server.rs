@@ -15,7 +15,7 @@ impl Server {
     pub async fn start() {
         RUNTIME.as_ref();
         let app = Router::new()
-            .route("/", get(Self::handler))
+            .route("/runwasm", get(Self::handler))
             .route("/status", get(Self::get_status))
             .route("/uname", get(Self::get_status_by_name))
             .route("/completed", get(Self::get_completed_status));

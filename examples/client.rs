@@ -21,7 +21,7 @@ async fn main() {
             20,
             "add",
         );
-        client.spawn(&config).await.unwrap();
+        client.spawn_wasm(&config).await.unwrap();
     }
     client.get_status().await.unwrap();
     client.get_status_by_name("task1").await.unwrap();
