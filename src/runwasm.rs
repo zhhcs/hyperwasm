@@ -56,7 +56,9 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
 
     let mut expected_execution_time = None;
     let mut relative_deadline = None;
-    if config.expected_execution_time != 0 && config.relative_deadline != 0 {
+    if config.expected_execution_time != 0
+        && config.relative_deadline >= config.expected_execution_time
+    {
         expected_execution_time = Some(std::time::Duration::from_millis(
             config.expected_execution_time,
         ));
