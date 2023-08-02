@@ -38,8 +38,11 @@ impl Config {
 }
 
 pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
+    if config.relative_deadline < config.expected_execution_time {
+        return Err(wasmtime::Error::msg("Invalid deadline").context("Invalid deadline"));
+    }
     if MAP.with(|map| map.borrow().contains_key(config.unique_name.as_str())) {
-        return Err(wasmtime::Error::msg("need unique name").context("need unique name"));
+        return Err(wasmtime::Error::msg("Invalid unique name").context("Invalid unique name"));
     }
     let mut store = Store::<()>::default();
     let module = Module::from_file(store.engine(), config.path)?;
@@ -56,9 +59,7 @@ pub fn run_wasm(rt: &Runtime, config: Config) -> wasmtime::Result<()> {
 
     let mut expected_execution_time = None;
     let mut relative_deadline = None;
-    if config.expected_execution_time != 0
-        && config.relative_deadline >= config.expected_execution_time
-    {
+    if config.expected_execution_time != 0 {
         expected_execution_time = Some(std::time::Duration::from_millis(
             config.expected_execution_time,
         ));
