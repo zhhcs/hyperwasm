@@ -1,3 +1,6 @@
+use std::thread;
+use std::time::Duration;
+
 use hyper_scheduler::axum::client::Client;
 use hyper_scheduler::runwasm::Config;
 
@@ -11,30 +14,29 @@ async fn main() {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
     let client = Client::new();
-    for i in 0..5 {
+    let config = Config::new(
+        "hello",
+        "/home/ubuntu/dev/hyper-scheduler/examples/test.wasm",
+        0,
+        0,
+        "fib",
+    );
+    client.init(&config).await.unwrap();
+    thread::sleep(Duration::from_millis(2000));
+    for i in 0..2 {
         let mut name = String::from("task");
         name.push_str(&i.to_string());
         let config = Config::new(
             &name,
-            "/home/ubuntu/dev/hyper-scheduler/examples/add.wat",
-            12,
-            36,
-            "add",
+            "/home/ubuntu/dev/hyper-scheduler/examples/test.wasm",
+            0,
+            0,
+            "fib",
         );
-        client.spawn_wasm(&config).await.unwrap();
-    }
-    client.get_status().await.unwrap();
-    for i in 5..10 {
-        let mut name = String::from("task");
-        name.push_str(&i.to_string());
-        let config = Config::new(
-            &name,
-            "/home/ubuntu/dev/hyper-scheduler/examples/add.wat",
-            12,
-            20,
-            "add",
-        );
-        client.spawn_wasm(&config).await.unwrap();
+        client
+            .call(&config, "http://127.0.0.1:3001/fib")
+            .await
+            .unwrap();
     }
     client.get_status().await.unwrap();
 }

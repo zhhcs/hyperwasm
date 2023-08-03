@@ -1,10 +1,27 @@
-use std::sync::Arc;
-
 use crate::{
     runtime::Runtime,
-    runwasm::{get_status_by_name, run_wasm, Config},
+    runwasm::{call, get_status_by_name, Config, Environment},
 };
 use axum::{extract::Query, routing::get, Json, Router};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc,
+    },
+};
+
+static mut PORT: AtomicU16 = AtomicU16::new(3000);
+
+fn get_port() -> u16 {
+    unsafe { PORT.fetch_add(1, Ordering::SeqCst) }
+}
+
+thread_local! {
+    static ENV_MAP: RefCell<HashMap<String, Environment>> = RefCell::new(HashMap::new());
+}
 
 lazy_static::lazy_static! {
     static ref RUNTIME: Arc<Runtime> = Arc::new(Runtime::new());
@@ -15,25 +32,60 @@ impl Server {
     pub async fn start() {
         RUNTIME.as_ref();
         let app = Router::new()
-            .route("/runwasm", get(Self::handler))
+            .route("/init", get(Self::init))
             .route("/status", get(Self::get_status))
             .route("/uname", get(Self::get_status_by_name))
             .route("/completed", get(Self::get_completed_status));
 
-        tracing::info!("listening on 0.0.0.0:3000");
-        axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+        let addr = SocketAddr::from(([0, 0, 0, 0], get_port()));
+        tracing::info!("listening on {}", addr);
+
+        axum::Server::bind(&addr)
             .serve(app.into_make_service())
             .await
             .unwrap();
     }
 
-    async fn handler(Json(config): Json<Config>) -> String {
-        tracing::trace!("Received a request");
-        // tracing::info!("{}", config);
-        match run_wasm(&RUNTIME, config) {
-            Ok(_) => "new task spawned".to_string(),
-            Err(err) => err.to_string(),
+    async fn init(Json(config): Json<Config>) -> String {
+        if ENV_MAP.with(|map| map.borrow().contains_key(config.get_wasm_name())) {
+            return "Invalid wasm name".to_string();
         }
+        if let Ok(env) = Environment::new(&config) {
+            ENV_MAP.with(|map| {
+                map.borrow_mut()
+                    .insert((&env.get_wasm_name()).to_string(), env)
+            });
+            let port = get_port();
+            let path = "/".to_owned() + &config.get_wasm_name();
+            let app = Router::new().route(&path, get(Self::call));
+            let addr = SocketAddr::from(([0, 0, 0, 0], port));
+            tracing::info!("{} listening on {}", &config.get_wasm_name(), addr);
+            tokio::spawn(async move {
+                axum::Server::bind(&addr)
+                    .serve(app.into_make_service())
+                    .await
+                    .unwrap();
+            });
+            return addr.to_string() + &path;
+        };
+        "unexpected error".to_string()
+    }
+
+    async fn call(Json(config): Json<Config>) -> String {
+        let mut response = String::new();
+        ENV_MAP.with(|map| {
+            if let Some(env) = map.borrow().get(config.get_wasm_name()) {
+                let env = env.clone();
+                match call(&RUNTIME, env, config) {
+                    Ok(_) => response.push_str("new task spawned"),
+                    Err(err) => response.push_str(&err.to_string()),
+                };
+            } else {
+                response.push_str("Invalid wasm name");
+            }
+        });
+
+        response
     }
 
     async fn get_status() -> String {

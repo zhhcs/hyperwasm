@@ -11,11 +11,26 @@ impl Client {
         }
     }
 
-    pub async fn spawn_wasm(&self, config: &Config) -> Result<(), reqwest::Error> {
+    pub async fn init(&self, config: &Config) -> Result<(), reqwest::Error> {
         let json = serde_json::to_string(config).unwrap();
         let resp = self
             .client
-            .get("http://127.0.0.1:3000/runwasm")
+            .get("http://127.0.0.1:3000/init")
+            .header("Content-Type", "application/json")
+            .body(json.clone())
+            .send()
+            .await?;
+
+        let body = resp.text().await?;
+        tracing::info!("Response: {}", body);
+        Ok(())
+    }
+
+    pub async fn call(&self, config: &Config, url: &str) -> Result<(), reqwest::Error> {
+        let json = serde_json::to_string(config).unwrap();
+        let resp = self
+            .client
+            .get(url)
             .header("Content-Type", "application/json")
             .body(json.clone())
             .send()
