@@ -189,6 +189,8 @@ impl Worker {
 
     fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>) {
         // tracing::info!("running coroutine");
+        unsafe { get_timer().as_mut().reset_timer() };
+
         let c = unsafe { co.as_mut() };
         if c.resume(&self.scheduler) {
             return;
@@ -202,6 +204,6 @@ impl Worker {
     fn drop_coroutine(co: ptr::NonNull<Coroutine>) {
         // tracing::info!("dropping coroutine");
         drop(unsafe { Box::from_raw(co.as_ptr()) });
-        unsafe { get_timer().as_mut().reset_timer() };
+        // unsafe { get_timer().as_mut().reset_timer() };
     }
 }

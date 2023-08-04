@@ -340,7 +340,7 @@ extern "C" fn signal_handler(signal: libc::c_int) {
             // let end = Instant::now();
             // tracing::info!("time cost: {:?}", end - start);
         };
-        unsafe { get_timer().as_mut() }.reset_timer();
+        // unsafe { get_timer().as_mut() }.reset_timer();
         // tracing::info!("now suspended {:?}", Instant::now());
 
         unsafe {
@@ -365,7 +365,7 @@ extern "C" fn signal_handler(signal: libc::c_int) {
             }
         }
 
-        unsafe { get_timer().as_mut() }.reset_timer();
+        // unsafe { get_timer().as_mut() }.reset_timer();
 
         unsafe {
             libc::sigemptyset(&mut mask);
