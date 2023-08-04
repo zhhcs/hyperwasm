@@ -16,6 +16,8 @@ pub struct Config {
     expected_execution_time: u64,
     relative_deadline: u64,
     wasm_name: String,
+    func: Option<String>,
+    param: Option<i32>,
     // TODO: params & results
 }
 
@@ -26,6 +28,8 @@ impl Config {
         expected_execution_time: u64,
         relative_deadline: u64,
         wasm_name: &str,
+        func: Option<String>,
+        param: Option<i32>,
     ) -> Config {
         Config {
             task_unique_name: task_unique_name.to_string(),
@@ -33,6 +37,8 @@ impl Config {
             expected_execution_time,
             relative_deadline,
             wasm_name: wasm_name.to_string(),
+            func,
+            param,
         }
     }
 
@@ -92,13 +98,7 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
     // Instantiate into our own unique store using the shared linker, afterwards
     // acquiring the `_start` function for the module and executing it.
     let instance = env.linker.instantiate(&mut store, &env.module)?;
-    let caller = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
-    let func = move || {
-        if let Ok(_) = caller.call(&mut store, ()) {
-        } else {
-            tracing::warn!("run wasm error");
-        };
-    };
+
     let mut expected_execution_time = None;
     let mut relative_deadline = None;
     if config.expected_execution_time != 0 {
@@ -108,13 +108,48 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
         relative_deadline = Some(std::time::Duration::from_millis(config.relative_deadline));
     }
 
-    let id = rt.spawn(func, expected_execution_time, relative_deadline);
-    match id {
-        Ok(id) => {
-            NAME_ID.with(|map| map.borrow_mut().insert(config.task_unique_name, id));
-            Ok(())
+    let mut name = String::new();
+    match config.func {
+        Some(func) => name.push_str(&func),
+        None => name.push_str("_start"),
+    }
+    match config.param {
+        Some(param) => {
+            let caller = instance.get_typed_func::<i32, i32>(&mut store, &name)?;
+            let func = move || {
+                if let Ok(res) = caller.call(&mut store, param) {
+                    tracing::info!("res = {}", res);
+                } else {
+                    tracing::warn!("run wasm error");
+                };
+            };
+            let id = rt.spawn(func, expected_execution_time, relative_deadline);
+            match id {
+                Ok(id) => {
+                    NAME_ID.with(|map| map.borrow_mut().insert(config.task_unique_name, id));
+                    Ok(())
+                }
+                Err(err) => Err(err.into()),
+            }
         }
-        Err(err) => Err(err.into()),
+        None => {
+            let caller = instance.get_typed_func::<(), i32>(&mut store, &name)?;
+            let func = move || {
+                if let Ok(res) = caller.call(&mut store, ()) {
+                    tracing::info!("res = {}", res);
+                } else {
+                    tracing::warn!("run wasm error");
+                };
+            };
+            let id = rt.spawn(func, expected_execution_time, relative_deadline);
+            match id {
+                Ok(id) => {
+                    NAME_ID.with(|map| map.borrow_mut().insert(config.task_unique_name, id));
+                    Ok(())
+                }
+                Err(err) => Err(err.into()),
+            }
+        }
     }
 }
 

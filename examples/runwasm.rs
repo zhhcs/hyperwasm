@@ -19,6 +19,8 @@ fn main() {
         12,
         20,
         "add",
+        None,
+        None,
     );
 
     let _ = run_wasm(&rt, config);

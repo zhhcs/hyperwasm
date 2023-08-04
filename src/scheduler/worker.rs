@@ -75,18 +75,16 @@ impl Worker {
     }
 
     pub fn set_curr(&mut self) {
-        if current_is_none() {
-            if let Some(co) = self.take_realtime() {
-                // tracing::info!("now setting current {:?}", std::time::Instant::now());
-                self.curr = Some(co);
-            } else if let Some(co) = self.local_queue.pop_front() {
-                self.curr = Some(co);
-            } else if let Some(co) = self.new_spawned.pop_front() {
-                let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
-                self.curr = Some(co);
-            } else if let Some(co) = self.suspend_queue.pop_front() {
-                self.curr = Some(co);
-            }
+        if let Some(co) = self.take_realtime() {
+            // tracing::info!("now setting current {:?}", std::time::Instant::now());
+            self.curr = Some(co);
+        } else if let Some(co) = self.local_queue.pop_front() {
+            self.curr = Some(co);
+        } else if let Some(co) = self.new_spawned.pop_front() {
+            let co = ptr::NonNull::from(Box::leak(Box::new(*co)));
+            self.curr = Some(co);
+        } else if let Some(co) = self.suspend_queue.pop_front() {
+            self.curr = Some(co);
         }
     }
 

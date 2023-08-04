@@ -16,10 +16,12 @@ async fn main() {
     let client = Client::new();
     let config = Config::new(
         "hello",
-        "/home/ubuntu/dev/hyper-scheduler/examples/fib32.wasm",
+        "/home/ubuntu/dev/hyper-scheduler/examples/fib().wasm",
         0,
         0,
-        "fib32",
+        "fib",
+        None,
+        None,
     );
     client.init(&config).await.unwrap();
     thread::sleep(Duration::from_millis(2000));
@@ -29,6 +31,8 @@ async fn main() {
         0,
         0,
         "fib33",
+        None,
+        None,
     );
     client.init(&config).await.unwrap();
 }
