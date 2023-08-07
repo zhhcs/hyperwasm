@@ -111,7 +111,12 @@ impl Runtime {
                 drop(status_map);
                 continue;
             }
-            let start = running.unwrap().curr_start_time.unwrap();
+            let start = running.unwrap().curr_start_time;
+            if start.is_none() {
+                drop(status_map);
+                continue;
+            }
+            let start = start.unwrap();
             let now = Instant::now();
             if status_map.get(&curr).unwrap().absolute_deadline.is_some() {
                 status_map.entry(curr).and_modify(|curr_stat| {

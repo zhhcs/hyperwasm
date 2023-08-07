@@ -292,7 +292,7 @@ impl Coroutine {
         co.schedule_status.update_running_time(now);
         co.schedule_status.update_remaining();
         co.schedule_status.update_status(now, CoStatus::COMPLETED);
-        tracing::info!("{}, completed", co.get_co_id());
+        // tracing::info!("{}, completed", co.get_co_id());
         ThisThread::restore();
     }
 
@@ -307,7 +307,7 @@ impl Coroutine {
 
     /// Resumes coroutine.
     pub fn resume(&mut self, sched: &Arc<Scheduler>) -> bool {
-        tracing::info!("{}, start resume", self.get_co_id());
+        // tracing::info!("{}, start resume", self.get_co_id());
         let now = Instant::now();
         self.schedule_status.curr_start_time = Some(now);
         self.status = CoStatus::RUNNING;
@@ -328,7 +328,7 @@ impl Coroutine {
     }
 
     pub fn suspend(&mut self, sched: &Arc<Scheduler>) {
-        tracing::info!("{}, start suspend", self.get_co_id());
+        // tracing::info!("{}, start suspend", self.get_co_id());
         let now = Instant::now();
         self.schedule_status.update_status(now, self.status);
         self.schedule_status.update_running_time(now);

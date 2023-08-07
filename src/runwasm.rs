@@ -113,12 +113,13 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
         Some(func) => name.push_str(&func),
         None => name.push_str("_start"),
     }
+    let task_unique_name = config.task_unique_name.clone();
     match config.param {
         Some(param) => {
             let caller = instance.get_typed_func::<i32, i32>(&mut store, &name)?;
             let func = move || {
                 if let Ok(res) = caller.call(&mut store, param) {
-                    tracing::info!("res = {}", res);
+                    tracing::info!("{}, res = {}", task_unique_name, res);
                 } else {
                     tracing::warn!("run wasm error");
                 };
@@ -136,7 +137,7 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
             let caller = instance.get_typed_func::<(), i32>(&mut store, &name)?;
             let func = move || {
                 if let Ok(res) = caller.call(&mut store, ()) {
-                    tracing::info!("res = {}", res);
+                    tracing::info!("{}, res = {}", task_unique_name, res);
                 } else {
                     tracing::warn!("run wasm error");
                 };
