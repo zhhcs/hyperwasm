@@ -143,14 +143,17 @@ impl Runtime {
                 }
             });
 
+            let s1 = stat_vec.peek().unwrap().to_owned();
             let mut total_remaining: f64 = 0.0;
-            for s in stat_vec.iter() {
+
+            while let Some(s) = stat_vec.pop() {
                 if s.absolute_deadline.is_some() {
                     total_remaining +=
                         s.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64;
                     let deadline =
                         (s.absolute_deadline.unwrap() - start).as_micros() as i128 as f64;
                     let util = total_remaining / deadline;
+                    // tracing::info!("tr: {},ddl: {}", total_remaining, deadline);
                     if util > 1.0 {
                         // tracing::info!("case 3");
                         return AdmissionControll::UNSCHEDULABLE;
@@ -158,7 +161,7 @@ impl Runtime {
                 }
             }
 
-            if stat_vec.peek().unwrap().eq(&co_stat) {
+            if s1.eq(&co_stat) {
                 // tracing::info!("case 4");
                 return AdmissionControll::PREEMPTIVE;
             }

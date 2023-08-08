@@ -16,16 +16,16 @@ async fn main() {
     let client = Client::new();
 
     let eet33 = 15;
-    fib(&client, "task1", 0, 0, 40).await;
+    fib(&client, "task1", 400, 800, 40).await;
     // fib33(&client, "task2", eet33, 70).await;
     // thread::sleep(Duration::from_millis(5));
     // fib(&client, "task3", 0, 0, 33).await;
     // fib33(&client, "task4", 0, 0).await;
     fib(&client, "task5", 10, 25, 32).await;
     fib33(&client, "task6", 0, 0).await;
-    fib(&client, "task7", 8, 40, 31).await;
+    fib(&client, "task7", 8, 20, 31).await;
     // thread::sleep(Duration::from_millis(5));
-    fib33(&client, "task8", eet33, 60).await;
+    fib33(&client, "task8", eet33, 20).await;
     fib(&client, "task9", 0, 0, 34).await;
 }
 
