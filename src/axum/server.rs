@@ -34,8 +34,8 @@ impl Server {
         let app = Router::new()
             .route("/init", get(Self::init))
             .route("/status", get(Self::get_status))
-            .route("/uname", get(Self::get_status_by_name))
-            .route("/completed", get(Self::get_completed_status));
+            .route("/uname", get(Self::get_status_by_name));
+        // .route("/completed", get(Self::get_completed_status));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], get_port()));
         tracing::info!("listening on {}", addr);
@@ -116,22 +116,22 @@ impl Server {
         }
     }
 
-    async fn get_completed_status() -> String {
-        if let Some(status) = RUNTIME.get_completed_status() {
-            if status.len() == 0 {
-                return "no task completed".to_string();
-            }
-            let mut s = String::new();
-            status.iter().for_each(|(id, stat)| {
-                s.push_str(&format!(
-                    "\nid: {}, status: {:?}\n{}",
-                    id, stat.co_status, stat
-                ));
-            });
-            return s;
-        };
-        "500".to_string()
-    }
+    // async fn get_completed_status() -> String {
+    //     if let Some(status) = RUNTIME.get_completed_status() {
+    //         if status.len() == 0 {
+    //             return "no task completed".to_string();
+    //         }
+    //         let mut s = String::new();
+    //         status.iter().for_each(|(id, stat)| {
+    //             s.push_str(&format!(
+    //                 "\nid: {}, status: {:?}\n{}",
+    //                 id, stat.co_status, stat
+    //             ));
+    //         });
+    //         return s;
+    //     };
+    //     "500".to_string()
+    // }
 }
 
 #[derive(serde::Deserialize)]

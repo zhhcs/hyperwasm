@@ -115,7 +115,7 @@ pub struct Scheduler {
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
     cancelled_queue: Mutex<VecDeque<Box<Coroutine>>>,
     co_status: Mutex<BTreeMap<u64, SchedulerStatus>>,
-    completed_status: Mutex<BTreeMap<u64, SchedulerStatus>>,
+    completed_status: Mutex<lru::LruCache<u64, SchedulerStatus>>,
     curr_running_id: AtomicU64,
 }
 
@@ -130,7 +130,9 @@ impl Scheduler {
             global_queue: Mutex::new(VecDeque::new()),
             cancelled_queue: Mutex::new(VecDeque::new()),
             co_status: Mutex::new(BTreeMap::new()),
-            completed_status: Mutex::new(BTreeMap::new()),
+            completed_status: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(100).unwrap(),
+            )),
             curr_running_id: AtomicU64::new(0),
         })
     }
@@ -159,7 +161,7 @@ impl Scheduler {
             let w = unsafe { get_worker().as_mut() };
 
             // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 00_000_000, SIG, 3);
+            let timer = LocalTimer::new(tid.into(), 10_000_000, SIG, 3);
             timer.init();
             w.run();
         });
@@ -286,22 +288,22 @@ impl Scheduler {
                 return status.get(&id).cloned();
             }
         }
-        if let Ok(status) = self.completed_status.try_lock() {
+        if let Ok(mut status) = self.completed_status.try_lock() {
             return status.get(&id).cloned();
         }
         None
     }
 
-    pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
-        if let Ok(status) = self.completed_status.try_lock().as_mut() {
-            return Some(status.clone());
-        }
-        None
-    }
+    // pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+    //     if let Ok(status) = self.completed_status.try_lock().as_mut() {
+    //         return Some(status);
+    //     }
+    //     None
+    // }
 
     pub fn update_completed_status(&self, co_id: u64, stat: SchedulerStatus) {
         if let Ok(status) = self.completed_status.lock().as_mut() {
-            status.insert(co_id, stat);
+            status.push(co_id, stat);
         }
         self.delete_status(co_id);
     }

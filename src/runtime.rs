@@ -179,16 +179,16 @@ impl Runtime {
         self.scheduler.get_status()
     }
 
-    pub fn print_completed_status(&self) {
-        let s = self.scheduler.get_completed_status().unwrap();
-        s.iter().for_each(|(id, stat)| {
-            tracing::info!("id: {}, status: \n{}", id, stat);
-        });
-    }
+    // pub fn print_completed_status(&self) {
+    //     let s = self.scheduler.get_completed_status().unwrap();
+    //     s.iter().for_each(|(id, stat)| {
+    //         tracing::info!("id: {}, status: \n{}", id, stat);
+    //     });
+    // }
 
-    pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
-        self.scheduler.get_completed_status()
-    }
+    // pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+    //     self.scheduler.get_completed_status()
+    // }
 }
 
 impl Drop for Runtime {

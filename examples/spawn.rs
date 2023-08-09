@@ -84,7 +84,7 @@ fn main() {
     );
     std::thread::sleep(std::time::Duration::from_millis(2_000));
     // assert_eq!(crate::NUM.load(std::sync::atomic::Ordering::Acquire), 0);
-    rt.print_completed_status();
+    // rt.print_completed_status();
     exit(0);
 }
 

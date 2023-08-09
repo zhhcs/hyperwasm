@@ -66,15 +66,15 @@ impl Client {
         Ok(())
     }
 
-    pub async fn get_completed_status(&self) -> Result<(), reqwest::Error> {
-        let resp = self
-            .client
-            .get("http://127.0.0.1:3000/completed")
-            .send()
-            .await?;
+    // pub async fn get_completed_status(&self) -> Result<(), reqwest::Error> {
+    //     let resp = self
+    //         .client
+    //         .get("http://127.0.0.1:3000/completed")
+    //         .send()
+    //         .await?;
 
-        let body = resp.text().await?;
-        tracing::info!("Response: {}", body);
-        Ok(())
-    }
+    //     let body = resp.text().await?;
+    //     tracing::info!("Response: {}", body);
+    //     Ok(())
+    // }
 }
