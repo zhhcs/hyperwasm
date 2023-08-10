@@ -2,7 +2,7 @@ use crate::{
     runtime::Runtime,
     runwasm::{call, get_status_by_name, Config, Environment},
 };
-use axum::{extract::Query, routing::get, Json, Router};
+use axum::{body::Body, extract::Query, http::Request, routing::get, Json, Router};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -57,7 +57,10 @@ impl Server {
             });
             let port = get_port();
             let path = "/".to_owned() + &config.get_wasm_name();
-            let app = Router::new().route(&path, get(Self::call));
+            let path_with = "/".to_owned() + &config.get_wasm_name() + "/config";
+            let app = Router::new()
+                .route(&path, get(Self::call))
+                .route(&path_with, get(Self::call_with));
             let addr = SocketAddr::from(([0, 0, 0, 0], port));
             tracing::info!("{} listening on {}", &config.get_wasm_name(), addr);
             tokio::spawn(async move {
@@ -71,20 +74,48 @@ impl Server {
         "unexpected error".to_string()
     }
 
-    async fn call(Json(config): Json<Config>) -> String {
+    async fn call_with(Json(config): Json<Config>) -> String {
+        let start = std::time::Instant::now();
         let mut response = String::new();
         ENV_MAP.with(|map| {
             if let Some(env) = map.borrow().get(config.get_wasm_name()) {
                 let env = env.clone();
-                match call(&RUNTIME, env, config) {
-                    Ok(_) => response.push_str("new task spawned"),
+                match call(&RUNTIME, env, Some(config)) {
+                    Ok((id, name)) => {
+                        response.push_str(&format!("new task spawned id: {}, name: {}", id, name))
+                    }
                     Err(err) => response.push_str(&err.to_string()),
                 };
             } else {
                 response.push_str("Invalid wasm name");
             }
         });
+        let end = std::time::Instant::now();
+        tracing::info!("call with {:?}", end - start);
+        response
+    }
 
+    async fn call(req: Request<Body>) -> String {
+        let start = std::time::Instant::now();
+        let mut response = String::new();
+        let mut uri = req.uri().to_string();
+        uri.remove(0);
+        // tracing::info!("uri = {}", uri);
+        ENV_MAP.with(|map| {
+            if let Some(env) = map.borrow().get(&uri) {
+                let env = env.clone();
+                match call(&RUNTIME, env, None) {
+                    Ok((id, name)) => {
+                        response.push_str(&format!("new task spawned id: {}, name: {}", id, name))
+                    }
+                    Err(err) => response.push_str(&err.to_string()),
+                };
+            } else {
+                response.push_str("Invalid wasm name");
+            }
+        });
+        let end = std::time::Instant::now();
+        tracing::info!("call {:?}", end - start);
         response
     }
 

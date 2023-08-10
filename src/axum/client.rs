@@ -26,7 +26,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn call(&self, config: &Config, url: &str) -> Result<(), reqwest::Error> {
+    pub async fn call_with(&self, config: &Config, url: &str) -> Result<(), reqwest::Error> {
         let json = serde_json::to_string(config).unwrap();
         let resp = self
             .client
@@ -35,6 +35,14 @@ impl Client {
             .body(json.clone())
             .send()
             .await?;
+
+        let body = resp.text().await?;
+        tracing::info!("Response: {}", body);
+        Ok(())
+    }
+
+    pub async fn call(&self, url: &str) -> Result<(), reqwest::Error> {
+        let resp = self.client.get(url).send().await?;
 
         let body = resp.text().await?;
         tracing::info!("Response: {}", body);

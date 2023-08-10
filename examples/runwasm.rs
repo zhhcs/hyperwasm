@@ -58,7 +58,7 @@ fn fib(env: &Environment, rt: &Runtime, name: &str, eet: u64, ddl: u64, param: i
     );
 
     let env = env.clone();
-    let _ = call(&rt, env, config);
+    let _ = call(&rt, env, Some(config));
 }
 
 fn fib33(env: &Environment, rt: &Runtime, name: &str, eet: u64, ddl: u64) {
@@ -72,5 +72,5 @@ fn fib33(env: &Environment, rt: &Runtime, name: &str, eet: u64, ddl: u64) {
         None,
     );
     let env = env.clone();
-    let _ = call(&rt, env, config);
+    let _ = call(&rt, env, Some(config));
 }

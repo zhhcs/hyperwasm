@@ -13,6 +13,8 @@ async fn main() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
+    thread::sleep(Duration::from_millis(2000));
+
     let client = Client::new();
     let config = Config::new(
         "hello",
@@ -20,7 +22,7 @@ async fn main() {
         0,
         0,
         "fib",
-        None,
+        Some("fib".to_owned()),
         None,
     );
     client.init(&config).await.unwrap();
@@ -28,10 +30,10 @@ async fn main() {
     let config = Config::new(
         "hello",
         "/home/ubuntu/dev/hyper-scheduler/examples/fib33.wasm",
-        0,
-        0,
+        15,
+        20,
         "fib33",
-        None,
+        Some("fib33".to_owned()),
         None,
     );
     client.init(&config).await.unwrap();

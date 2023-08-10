@@ -9,7 +9,7 @@ thread_local! {
     static NAME_ID: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     task_unique_name: String,
     path: String,
@@ -54,6 +54,7 @@ impl Config {
 #[derive(Clone)]
 pub struct Environment {
     wasm_name: String,
+    config: Config,
     engine: Engine,
     module: Module,
     linker: Arc<Linker<WasiCtx>>,
@@ -70,6 +71,7 @@ impl Environment {
 
         Ok(Self {
             wasm_name,
+            config: config.clone(),
             engine,
             module,
             linker: Arc::new(linker),
@@ -81,11 +83,25 @@ impl Environment {
     }
 }
 
-pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error> {
-    if config.relative_deadline < config.expected_execution_time {
+pub fn call(
+    rt: &Runtime,
+    env: Environment,
+    config: Option<Config>,
+) -> Result<(u64, String), Error> {
+    let conf = match config {
+        Some(config) => config,
+        None => {
+            let mut env_config = env.config.clone();
+            env_config.task_unique_name =
+                env_config.task_unique_name + "-" + &uuid::Uuid::new_v4().simple().to_string();
+            env_config
+        }
+    };
+
+    if conf.relative_deadline < conf.expected_execution_time {
         return Err(wasmtime::Error::msg("Invalid deadline").context("Invalid deadline"));
     }
-    if NAME_ID.with(|map| map.borrow().contains_key(config.task_unique_name.as_str())) {
+    if NAME_ID.with(|map| map.borrow().contains_key(conf.task_unique_name.as_str())) {
         return Err(wasmtime::Error::msg("Invalid unique name").context("Invalid unique name"));
     }
     let wasi = WasiCtxBuilder::new()
@@ -101,20 +117,20 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
 
     let mut expected_execution_time = None;
     let mut relative_deadline = None;
-    if config.expected_execution_time != 0 {
+    if conf.expected_execution_time != 0 {
         expected_execution_time = Some(std::time::Duration::from_millis(
-            config.expected_execution_time,
+            conf.expected_execution_time,
         ));
-        relative_deadline = Some(std::time::Duration::from_millis(config.relative_deadline));
+        relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
     }
 
     let mut name = String::new();
-    match config.func {
+    match conf.func {
         Some(func) => name.push_str(&func),
         None => name.push_str("_start"),
     }
-    let task_unique_name = config.task_unique_name.clone();
-    match config.param {
+    let task_unique_name = conf.task_unique_name.clone();
+    match conf.param {
         Some(param) => {
             let caller = instance.get_typed_func::<i32, i32>(&mut store, &name)?;
             let func = move || {
@@ -127,8 +143,8 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
             let id = rt.spawn(func, expected_execution_time, relative_deadline);
             match id {
                 Ok(id) => {
-                    NAME_ID.with(|map| map.borrow_mut().insert(config.task_unique_name, id));
-                    Ok(())
+                    NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
+                    Ok((id, conf.task_unique_name))
                 }
                 Err(err) => Err(err.into()),
             }
@@ -145,8 +161,8 @@ pub fn call(rt: &Runtime, env: Environment, config: Config) -> Result<(), Error>
             let id = rt.spawn(func, expected_execution_time, relative_deadline);
             match id {
                 Ok(id) => {
-                    NAME_ID.with(|map| map.borrow_mut().insert(config.task_unique_name, id));
-                    Ok(())
+                    NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
+                    Ok((id, conf.task_unique_name))
                 }
                 Err(err) => Err(err.into()),
             }
