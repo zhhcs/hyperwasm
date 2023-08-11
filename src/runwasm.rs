@@ -92,8 +92,13 @@ pub fn call(
         Some(config) => config,
         None => {
             let mut env_config = env.config.clone();
-            env_config.task_unique_name =
-                env_config.task_unique_name + "-" + &uuid::Uuid::new_v4().simple().to_string();
+            env_config.task_unique_name = env_config.task_unique_name
+                + "-"
+                + &rand::Rng::sample_iter(rand::thread_rng(), &rand::distributions::Alphanumeric)
+                    .take(7)
+                    .map(char::from)
+                    .collect::<String>();
+
             env_config
         }
     };

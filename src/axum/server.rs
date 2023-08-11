@@ -75,13 +75,15 @@ impl Server {
     }
 
     async fn call_with(Json(config): Json<Config>) -> String {
-        let start = std::time::Instant::now();
+        // let start = std::time::Instant::now();
         let mut response = String::new();
         ENV_MAP.with(|map| {
             if let Some(env) = map.borrow().get(config.get_wasm_name()) {
                 let env = env.clone();
                 match call(&RUNTIME, env, Some(config)) {
                     Ok((id, name)) => {
+                        // let end = std::time::Instant::now();
+                        // tracing::info!("call with {:?}", end - start);
                         response.push_str(&format!("new task spawned id: {}, name: {}", id, name))
                     }
                     Err(err) => response.push_str(&err.to_string()),
@@ -90,13 +92,12 @@ impl Server {
                 response.push_str("Invalid wasm name");
             }
         });
-        let end = std::time::Instant::now();
-        tracing::info!("call with {:?}", end - start);
+
         response
     }
 
     async fn call(req: Request<Body>) -> String {
-        let start = std::time::Instant::now();
+        // let start = std::time::Instant::now();
         let mut response = String::new();
         let mut uri = req.uri().to_string();
         uri.remove(0);
@@ -106,6 +107,8 @@ impl Server {
                 let env = env.clone();
                 match call(&RUNTIME, env, None) {
                     Ok((id, name)) => {
+                        // let end = std::time::Instant::now();
+                        // tracing::info!("call {:?}", end - start);
                         response.push_str(&format!("new task spawned id: {}, name: {}", id, name))
                     }
                     Err(err) => response.push_str(&err.to_string()),
@@ -114,8 +117,7 @@ impl Server {
                 response.push_str("Invalid wasm name");
             }
         });
-        let end = std::time::Instant::now();
-        tracing::info!("call {:?}", end - start);
+
         response
     }
 
