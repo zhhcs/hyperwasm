@@ -130,11 +130,30 @@ pub fn call(
     }
 
     let mut name = String::new();
+    let task_unique_name = conf.task_unique_name.clone();
     match conf.func {
         Some(func) => name.push_str(&func),
-        None => name.push_str("_start"),
+        None => {
+            name.push_str("_start");
+            let caller = instance.get_typed_func::<(), ()>(&mut store, &name)?;
+            let func = move || {
+                if let Ok(_) = caller.call(&mut store, ()) {
+                    tracing::info!("{} end", task_unique_name);
+                } else {
+                    tracing::warn!("run wasm error");
+                };
+            };
+            let id = rt.spawn(func, expected_execution_time, relative_deadline);
+            match id {
+                Ok(id) => {
+                    NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
+                    return Ok((id, conf.task_unique_name));
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
     }
-    let task_unique_name = conf.task_unique_name.clone();
+
     match conf.param {
         Some(param) => {
             let caller = instance.get_typed_func::<i32, i32>(&mut store, &name)?;

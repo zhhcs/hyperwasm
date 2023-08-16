@@ -37,4 +37,15 @@ async fn main() {
         None,
     );
     client.init(&config).await.unwrap();
+    thread::sleep(Duration::from_millis(2000));
+    let config = Config::new(
+        "fib34",
+        "/home/ubuntu/dev/hyper-scheduler/examples/fib34.wasm",
+        20,
+        35,
+        "fib34",
+        None,
+        None,
+    );
+    client.init(&config).await.unwrap();
 }

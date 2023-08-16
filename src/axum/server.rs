@@ -92,7 +92,7 @@ impl Server {
                 response.push_str("Invalid wasm name");
             }
         });
-
+        response.push_str("\n");
         response
     }
 
