@@ -98,18 +98,6 @@
             value: 50
           - name: func  #导出函数(可选)
             value: fib33
-      tolerations:
-        - key: "node.kubernetes.io/network-unavailable"
-          operator: "Exists"
-          effect: "NoSchedule"
-        - key: "kubernetes.io/arch"
-          operator: "Equal"
-          value: "wasm32-wasi"
-          effect: "NoExecute"
-        - key: "kubernetes.io/arch"
-          operator: "Equal"
-          value: "wasm32-wasi"
-          effect: "NoSchedule"
     ```
     
 6. url输出到日志中
