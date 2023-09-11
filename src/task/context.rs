@@ -60,6 +60,8 @@ impl Context {
     pub fn switch(&self, backup: &mut Context) {
         let rc = unsafe { swapcontext(&mut backup.context, &self.context) };
         // tracing::info!("context switched");
+        // let now = std::time::Instant::now();
+        // tracing::info!("swapcontext {:?}", now);
         if rc != 0 {
             panic!("swapcontext returns {}", rc);
         }

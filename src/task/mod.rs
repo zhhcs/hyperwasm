@@ -318,6 +318,8 @@ impl Coroutine {
         let _scope = Scope::enter(self);
 
         if let Some(context) = &self.context {
+            // let now = Instant::now();
+            // tracing::info!("resume {}, {:?}", self.get_co_id(), now);
             ThisThread::resume(&context);
         };
 
@@ -333,8 +335,11 @@ impl Coroutine {
         self.schedule_status.update_status(now, self.status);
         self.schedule_status.update_running_time(now);
         self.schedule_status.update_remaining();
+        // let id = self.get_co_id();
         sched.update_status(self.get_co_id(), self.get_schedulestatus());
         if let Some(context) = &mut self.context {
+            // let now = Instant::now();
+            // tracing::info!("suspend {}, {:?}", id, now);
             ThisThread::suspend(context);
         };
 
