@@ -1,4 +1,4 @@
-use crate::{runtime::Runtime, task::SchedulerStatus};
+use crate::{axum::server::CallConfigRequest, runtime::Runtime, task::SchedulerStatus};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap, fmt, sync::Arc};
@@ -80,6 +80,130 @@ impl Environment {
 
     pub fn get_wasm_name(&self) -> &str {
         &self.wasm_name
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FuncConfig {
+    task_unique_name: String,   //实例名称,必须唯一
+    export_func: String,        //调用的导出函数名称
+    params: Vec<wasmtime::Val>, //数组
+    results: Vec<wasmtime::Val>,
+    expected_execution_time: u64, //预期执行时长(必须小于相对截止时间，单位毫秒)
+    relative_deadline: u64,       //相对截止时间(单位毫秒)
+}
+
+impl FuncConfig {
+    pub fn new(call_config: CallConfigRequest) -> FuncConfig {
+        let params = cvt_params(call_config.param_type, call_config.params);
+        let results_len = call_config.results_length.parse().unwrap();
+        let results = vec![params[0].clone(); results_len];
+        // tracing::info!("params: {:?}", params);
+        FuncConfig {
+            task_unique_name: "anon".to_owned(), //call_config.task_unique_name,
+            export_func: call_config.export_func,
+            params,
+            results,
+            expected_execution_time: 0, //call_config.expected_execution_time.parse::<u64>().unwrap(),
+            relative_deadline: 0,       //call_config.relative_deadline.parse::<u64>().unwrap(),
+        }
+    }
+}
+
+fn cvt_params(param_type: String, params: Vec<String>) -> Vec<wasmtime::Val> {
+    let mut res = Vec::new();
+    if param_type == "i32" {
+        params.iter().for_each(|param| {
+            let val = wasmtime::Val::from(param.parse::<i32>().unwrap());
+            res.push(val);
+        })
+    } else if param_type == "i64" {
+        params.iter().for_each(|param| {
+            let val = wasmtime::Val::from(param.parse::<i64>().unwrap());
+            res.push(val);
+        })
+    } else if param_type == "f32" {
+        params.iter().for_each(|param| {
+            let val = wasmtime::Val::from(param.parse::<f32>().unwrap());
+            res.push(val);
+        })
+    } else if param_type == "f64" {
+        params.iter().for_each(|param| {
+            let val = wasmtime::Val::from(param.parse::<f64>().unwrap());
+            res.push(val);
+        })
+    } else if param_type == "u128" {
+        params.iter().for_each(|param| {
+            let val = wasmtime::Val::from(param.parse::<u128>().unwrap());
+            res.push(val);
+        })
+    }
+    res
+}
+
+pub fn call_func_sync(env: Environment, mut conf: FuncConfig) -> Result<Vec<wasmtime::Val>, Error> {
+    let wasi = WasiCtxBuilder::new()
+        .inherit_stdio()
+        .inherit_args()?
+        .build();
+
+    let mut store = Store::new(&env.engine, wasi);
+    let instance = env.linker.instantiate(&mut store, &env.module)?;
+
+    if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
+        match caller.call(&mut store, &conf.params, &mut conf.results) {
+            Ok(_) => {
+                return Ok(conf.results);
+            }
+            Err(err) => return Err(err),
+        };
+    } else {
+        return Err(wasmtime::Error::msg("Invalid_export_func").context("Invalid_export_func"));
+    }
+}
+
+pub fn call_func(
+    rt: &Runtime,
+    env: Environment,
+    mut conf: FuncConfig,
+) -> Result<(u64, String), Error> {
+    if conf.relative_deadline <= conf.expected_execution_time {
+        return Err(wasmtime::Error::msg("Invalid_deadline").context("Invalid_deadline"));
+    }
+    if NAME_ID.with(|map| map.borrow().contains_key(conf.task_unique_name.as_str())) {
+        return Err(wasmtime::Error::msg("Invalid_unique_name").context("Invalid_unique_name"));
+    }
+    let wasi = WasiCtxBuilder::new()
+        .inherit_stdio()
+        .inherit_args()?
+        .build();
+
+    let mut store = Store::new(&env.engine, wasi);
+    let instance = env.linker.instantiate(&mut store, &env.module)?;
+
+    let expected_execution_time = Some(std::time::Duration::from_millis(
+        conf.expected_execution_time,
+    ));
+    let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
+    let task_unique_name = conf.task_unique_name.clone();
+    if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
+        let func = move || {
+            if let Ok(_) = caller.call(&mut store, &conf.params, &mut conf.results) {
+                tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
+            } else {
+                tracing::warn!("run_wasm_error");
+            };
+        };
+        let id = rt.spawn(func, expected_execution_time, relative_deadline);
+        match id {
+            Ok(id) => {
+                NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
+                return Ok((id, conf.task_unique_name));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    } else {
+        return Err(wasmtime::Error::msg("Invalid_export_func").context("Invalid_export_func"));
     }
 }
 

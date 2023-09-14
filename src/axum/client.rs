@@ -15,7 +15,7 @@ impl Client {
         let json = serde_json::to_string(config).unwrap();
         let resp = self
             .client
-            .get("http://127.0.0.1:3000/init")
+            .get("http://127.0.0.1:3001/init")
             .header("Content-Type", "application/json")
             .body(json.clone())
             .send()
@@ -52,7 +52,7 @@ impl Client {
     pub async fn get_status_by_name(&self, uname: &str) -> Result<(), reqwest::Error> {
         let resp = self
             .client
-            .get("http://127.0.0.1:3000/uname")
+            .get("http://127.0.0.1:3001/uname")
             .query(&[("uname", uname)])
             .send()
             .await?;
@@ -65,7 +65,7 @@ impl Client {
     pub async fn get_status(&self) -> Result<(), reqwest::Error> {
         let resp = self
             .client
-            .get("http://127.0.0.1:3000/status")
+            .get("http://127.0.0.1:3001/status")
             .send()
             .await?;
 
@@ -77,7 +77,7 @@ impl Client {
     // pub async fn get_completed_status(&self) -> Result<(), reqwest::Error> {
     //     let resp = self
     //         .client
-    //         .get("http://127.0.0.1:3000/completed")
+    //         .get("http://127.0.0.1:3001/completed")
     //         .send()
     //         .await?;
 
