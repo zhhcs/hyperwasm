@@ -43,7 +43,8 @@ impl Server {
             .route("/register", post(Self::register))
             .route("/init", get(Self::init))
             .route("/status", get(Self::get_status))
-            .route("/uname", get(Self::get_status_by_name));
+            .route("/uname", get(Self::get_status_by_name))
+            .route("/call", post(Self::call_func_sync));
         // .route("/completed", get(Self::get_completed_status));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], get_port()));
@@ -77,19 +78,9 @@ impl Server {
                     map.borrow_mut()
                         .insert((&env.get_wasm_name()).to_string(), env)
                 });
-                let port = get_port();
-                let path = "/".to_owned() + &name;
-                let app = Router::new().route(&path, post(Self::call_func_sync));
-                let addr = SocketAddr::from(([0, 0, 0, 0], port));
-                tracing::info!("{} listening on {}", &name, addr);
-                tokio::spawn(async move {
-                    axum::Server::bind(&addr)
-                        .serve(app.into_make_service())
-                        .await
-                        .unwrap();
-                });
+
                 reponse.status = "Success".to_owned();
-                reponse.url = format!("http://{}{}", addr, path);
+                reponse.url = format!("http://127.0.0.1:3001/call");
                 return Json(reponse);
             };
         }
@@ -101,10 +92,10 @@ impl Server {
             status: "Error".to_owned(),
             result: "null".to_owned(),
         };
-        let uri = call_config.wasm_name.to_owned();
+        let name = call_config.wasm_name.to_owned();
         let func_config = FuncConfig::new(call_config);
         ENV_MAP.with(|map| {
-            if let Some(env) = map.borrow().get(&uri) {
+            if let Some(env) = map.borrow().get(&name) {
                 let env = env.clone();
                 match call_func_sync(env, func_config) {
                     Ok(result) => {
