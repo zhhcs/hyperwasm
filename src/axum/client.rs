@@ -1,4 +1,6 @@
-use crate::runwasm::Config;
+use crate::{axum::get_port, runwasm::RegisterConfig};
+
+use super::CallConfigRequest;
 
 pub struct Client {
     client: reqwest::Client,
@@ -11,22 +13,8 @@ impl Client {
         }
     }
 
-    pub async fn init(&self, config: &Config) -> Result<(), reqwest::Error> {
-        let json = serde_json::to_string(config).unwrap();
-        let resp = self
-            .client
-            .get("http://127.0.0.1:3001/init")
-            .header("Content-Type", "application/json")
-            .body(json.clone())
-            .send()
-            .await?;
-
-        let body = resp.text().await?;
-        tracing::info!("Response: {}", body);
-        Ok(())
-    }
-
-    pub async fn call_with(&self, config: &Config, url: &str) -> Result<(), reqwest::Error> {
+    pub async fn init(&self, config: &RegisterConfig) -> Result<(), reqwest::Error> {
+        let url = format!("http://127.0.0.1:{}/init", get_port());
         let json = serde_json::to_string(config).unwrap();
         let resp = self
             .client
@@ -41,8 +29,17 @@ impl Client {
         Ok(())
     }
 
-    pub async fn call(&self, url: &str) -> Result<(), reqwest::Error> {
-        let resp = self.client.get(url).send().await?;
+    pub async fn call(&self, call_config: &CallConfigRequest) -> Result<(), reqwest::Error> {
+        let url = format!("http://127.0.0.1:{}/call", get_port());
+        let json = serde_json::to_string(call_config).unwrap();
+
+        let resp = self
+            .client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(json.clone())
+            .send()
+            .await?;
 
         let body = resp.text().await?;
         tracing::info!("Response: {}", body);
@@ -50,9 +47,11 @@ impl Client {
     }
 
     pub async fn get_status_by_name(&self, uname: &str) -> Result<(), reqwest::Error> {
+        let url = format!("http://127.0.0.1:{}/uname", get_port());
+
         let resp = self
             .client
-            .get("http://127.0.0.1:3001/uname")
+            .get(url)
             .query(&[("uname", uname)])
             .send()
             .await?;
@@ -63,26 +62,12 @@ impl Client {
     }
 
     pub async fn get_status(&self) -> Result<(), reqwest::Error> {
-        let resp = self
-            .client
-            .get("http://127.0.0.1:3001/status")
-            .send()
-            .await?;
+        let url = format!("http://127.0.0.1:{}/status", get_port());
+
+        let resp = self.client.get(url).send().await?;
 
         let body = resp.text().await?;
         tracing::info!("Response: {}", body);
         Ok(())
     }
-
-    // pub async fn get_completed_status(&self) -> Result<(), reqwest::Error> {
-    //     let resp = self
-    //         .client
-    //         .get("http://127.0.0.1:3001/completed")
-    //         .send()
-    //         .await?;
-
-    //     let body = resp.text().await?;
-    //     tracing::info!("Response: {}", body);
-    //     Ok(())
-    // }
 }
