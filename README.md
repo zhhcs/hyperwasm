@@ -76,6 +76,6 @@ FIXME2: 不支持生成子任务
 
 curl -F "fib.wasm=@/home/ubuntu/dev/hyper-scheduler/examples/fib.wasm" http://127.0.0.1:3001/register
 
-curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_func":"fib","param_type":"i32","params":["30"],"results_length":"1"}' -X POST http://127.0.0.1:3001/call
+curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_func":"fib","param_type":"i32","params":["32"],"results_length":"1"}' -X POST http://127.0.0.1:3001/call
 
-curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","task_unique_name":"fibabc","export_func":"fib","param_type":"i32","params":["30"],"expected_execution_time":"20","relative_deadline":"30"}' -X POST http://127.0.0.1:3001/fib.wasm
+curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","task_unique_name":"fibabc","export_func":"fib","param_type":"i32","params":["30"],"results_length":"1","expected_execution_time":"20","relative_deadline":"30"}' -X POST http://127.0.0.1:3001/call

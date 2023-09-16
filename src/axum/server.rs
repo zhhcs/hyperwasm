@@ -1,4 +1,5 @@
 use crate::{
+    result::{FuncResult, ResultFuture},
     runtime::Runtime,
     runwasm::{
         call, call_func, call_func_sync, get_status_by_name, Config, Environment, FuncConfig,
@@ -44,7 +45,7 @@ impl Server {
             .route("/init", get(Self::init))
             .route("/status", get(Self::get_status))
             .route("/uname", get(Self::get_status_by_name))
-            .route("/call", post(Self::call_func_sync));
+            .route("/call", post(Self::call_func));
         // .route("/completed", get(Self::get_completed_status));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], get_port()));
@@ -109,22 +110,24 @@ impl Server {
         Json(response)
     }
 
-    async fn _call_func(Json(call_config): Json<CallConfigRequest>) -> Json<CallFuncResponse> {
+    async fn call_func(Json(call_config): Json<CallConfigRequest>) -> Json<CallFuncResponse> {
         let mut response = CallFuncResponse {
             status: "Success".to_owned(),
             result: "null".to_owned(),
         };
-        let uri = call_config.wasm_name.to_owned();
+        let name = call_config.wasm_name.to_owned();
         let func_config = FuncConfig::new(call_config);
         // tracing::info!("uri = {}", uri);
+        let mut status = false;
+        let func_result = Arc::new(FuncResult::new());
         ENV_MAP.with(|map| {
-            if let Some(env) = map.borrow().get(&uri) {
+            if let Some(env) = map.borrow().get(&name) {
                 let env = env.clone();
-                match call_func(&RUNTIME, env, func_config) {
-                    Ok((id, name)) => {
+                match call_func(&RUNTIME, env, func_config, &func_result) {
+                    Ok(_) => {
+                        status = true;
                         // let end = std::time::Instant::now();
                         // tracing::info!("call {:?}", end - start);
-                        response.result = format!("{}_{}", id, name);
                     }
                     Err(err) => response.status = format!("Error_{}", err),
                 };
@@ -132,7 +135,10 @@ impl Server {
                 response.status = "Error_Invalid_wasm_name".to_owned();
             }
         });
-
+        if status {
+            let res = Self::get_result(&func_result).await;
+            response.result = res;
+        }
         Json(response)
     }
 
@@ -255,6 +261,13 @@ impl Server {
     //     };
     //     "500".to_string()
     // }
+
+    async fn get_result(func_result: &Arc<FuncResult>) -> String {
+        ResultFuture {
+            result: func_result.clone(),
+        }
+        .await
+    }
 }
 
 #[derive(serde::Deserialize)]

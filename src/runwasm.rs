@@ -1,4 +1,6 @@
-use crate::{axum::server::CallConfigRequest, runtime::Runtime, task::SchedulerStatus};
+use crate::{
+    axum::server::CallConfigRequest, result::FuncResult, runtime::Runtime, task::SchedulerStatus,
+};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap, fmt, sync::Arc};
@@ -104,8 +106,8 @@ impl FuncConfig {
             export_func: call_config.export_func,
             params,
             results,
-            expected_execution_time: 0, //call_config.expected_execution_time.parse::<u64>().unwrap(),
-            relative_deadline: 0,       //call_config.relative_deadline.parse::<u64>().unwrap(),
+            expected_execution_time: 10, //call_config.expected_execution_time.parse::<u64>().unwrap(),
+            relative_deadline: 20,       //call_config.relative_deadline.parse::<u64>().unwrap(),
         }
     }
 }
@@ -166,6 +168,7 @@ pub fn call_func(
     rt: &Runtime,
     env: Environment,
     mut conf: FuncConfig,
+    func_result: &Arc<FuncResult>,
 ) -> Result<(u64, String), Error> {
     if conf.relative_deadline <= conf.expected_execution_time {
         return Err(wasmtime::Error::msg("Invalid_deadline").context("Invalid_deadline"));
@@ -186,13 +189,22 @@ pub fn call_func(
     ));
     let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
     let task_unique_name = conf.task_unique_name.clone();
+    let func_result = func_result.clone();
     if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
-        let func = move || {
-            if let Ok(_) = caller.call(&mut store, &conf.params, &mut conf.results) {
+        let func = move || match caller.call(&mut store, &conf.params, &mut conf.results) {
+            Ok(_) => {
                 tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
-            } else {
-                tracing::warn!("run_wasm_error");
-            };
+
+                func_result.set_completed();
+                func_result.set_result(&format!("{:?}", conf.results));
+                Ok(conf.results)
+            }
+            Err(err) => {
+                tracing::warn!("run_wasm_error: {}", err);
+                func_result.set_completed();
+                func_result.set_result(&format!("{:?}", err));
+                Err(err)
+            }
         };
         let id = rt.spawn(func, expected_execution_time, relative_deadline);
         match id {
