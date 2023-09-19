@@ -108,27 +108,33 @@ impl Server {
             result: "null".to_owned(),
         };
         let name = call_config.wasm_name.to_owned();
-        let func_config = FuncConfig::new(call_config);
         let mut status = false;
-        let func_result = Arc::new(FuncResult::new());
-        ENV_MAP.with(|map| {
-            if let Some(env) = map.borrow().get(&name) {
-                let env = env.clone();
-                match call_func(&RUNTIME, env, func_config, &func_result) {
-                    Ok(_) => {
-                        status = true;
+
+        match FuncConfig::new(call_config) {
+            Ok(func_config) => {
+                let func_result = Arc::new(FuncResult::new());
+                ENV_MAP.with(|map| {
+                    if let Some(env) = map.borrow().get(&name) {
+                        let env = env.clone();
+                        match call_func(&RUNTIME, env, func_config, &func_result) {
+                            Ok(_) => {
+                                status = true;
+                            }
+                            Err(err) => response.status = format!("Error_{}", err),
+                        };
+                    } else {
+                        response.status = "Error_Invalid_wasm_name".to_owned();
                     }
-                    Err(err) => response.status = format!("Error_{}", err),
-                };
-            } else {
-                response.status = "Error_Invalid_wasm_name".to_owned();
+                });
+                if status {
+                    let res = Self::get_result(&func_result).await;
+                    response.status = "Success".to_owned();
+                    response.result = res;
+                }
             }
-        });
-        if status {
-            let res = Self::get_result(&func_result).await;
-            response.status = "Success".to_owned();
-            response.result = res;
-        }
+            Err(err) => response.status = format!("Error_{}", err),
+        };
+
         Json(response)
     }
 

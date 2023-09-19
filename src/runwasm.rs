@@ -73,51 +73,81 @@ pub struct FuncConfig {
 }
 
 impl FuncConfig {
-    pub fn new(call_config: CallConfigRequest) -> FuncConfig {
-        let params = cvt_params(call_config.param_type, call_config.params);
-        let results_len = call_config.results_length.parse().unwrap();
-        let results = vec![params[0].clone(); results_len];
-        // tracing::info!("params: {:?}", params);
-        FuncConfig {
-            task_unique_name: call_config.task_unique_name,
-            export_func: call_config.export_func,
-            params,
-            results,
-            expected_execution_time: call_config.expected_execution_time.parse::<u64>().unwrap(),
-            relative_deadline: call_config.relative_deadline.parse::<u64>().unwrap(),
+    pub fn new(call_config: CallConfigRequest) -> Result<FuncConfig, Error> {
+        match cvt_params(call_config.param_type, call_config.params) {
+            Ok(params) => {
+                let results_len = call_config.results_length.parse().unwrap_or(0);
+                let results;
+                if params.len() == 0 {
+                    results = vec![wasmtime::Val::from(0); results_len];
+                } else {
+                    results = vec![params[0].clone(); results_len];
+                }
+                // tracing::info!("params: {:?}", params);
+                let fc = FuncConfig {
+                    task_unique_name: call_config.task_unique_name,
+                    export_func: call_config.export_func,
+                    params,
+                    results,
+                    expected_execution_time: call_config
+                        .expected_execution_time
+                        .parse::<u64>()
+                        .unwrap_or(0),
+                    relative_deadline: call_config.relative_deadline.parse::<u64>().unwrap_or(0),
+                };
+                Ok(fc)
+            }
+            Err(err) => Err(err),
         }
     }
 }
 
-fn cvt_params(param_type: String, params: Vec<String>) -> Vec<wasmtime::Val> {
+fn cvt_params(param_type: String, params: Vec<String>) -> Result<Vec<wasmtime::Val>, Error> {
     let mut res = Vec::new();
-    if param_type == "i32" {
+    let mut ok = true;
+    if param_type.to_ascii_lowercase() == "i32" {
         params.iter().for_each(|param| {
-            let val = wasmtime::Val::from(param.parse::<i32>().unwrap());
-            res.push(val);
+            match param.parse::<i32>() {
+                Ok(val) => res.push(wasmtime::Val::from(val)),
+                Err(_) => ok = false,
+            };
         })
-    } else if param_type == "i64" {
+    } else if param_type.to_ascii_lowercase() == "i64" {
         params.iter().for_each(|param| {
-            let val = wasmtime::Val::from(param.parse::<i64>().unwrap());
-            res.push(val);
+            match param.parse::<i64>() {
+                Ok(val) => res.push(wasmtime::Val::from(val)),
+                Err(_) => ok = false,
+            };
         })
-    } else if param_type == "f32" {
+    } else if param_type.to_ascii_lowercase() == "f32" {
         params.iter().for_each(|param| {
-            let val = wasmtime::Val::from(param.parse::<f32>().unwrap());
-            res.push(val);
+            match param.parse::<f32>() {
+                Ok(val) => res.push(wasmtime::Val::from(val)),
+                Err(_) => ok = false,
+            };
         })
-    } else if param_type == "f64" {
+    } else if param_type.to_ascii_lowercase() == "f64" {
         params.iter().for_each(|param| {
-            let val = wasmtime::Val::from(param.parse::<f64>().unwrap());
-            res.push(val);
+            match param.parse::<f64>() {
+                Ok(val) => res.push(wasmtime::Val::from(val)),
+                Err(_) => ok = false,
+            };
         })
-    } else if param_type == "u128" {
+    } else if param_type.to_ascii_lowercase() == "u128" {
         params.iter().for_each(|param| {
-            let val = wasmtime::Val::from(param.parse::<u128>().unwrap());
-            res.push(val);
+            match param.parse::<u128>() {
+                Ok(val) => res.push(wasmtime::Val::from(val)),
+                Err(_) => ok = false,
+            };
         })
+    } else {
+        ok = false;
     }
-    res
+    if ok {
+        Ok(res)
+    } else {
+        Err(wasmtime::Error::msg("Invalid_params").context("Invalid_params"))
+    }
 }
 
 #[deprecated]
