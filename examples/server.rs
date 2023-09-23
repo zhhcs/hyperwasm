@@ -11,6 +11,7 @@ fn main() {
     tracing::info!("Starting");
 
     let rt = tokio::runtime::Builder::new_current_thread()
+        .worker_threads(1)
         .enable_all()
         .build()
         .unwrap();

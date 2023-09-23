@@ -1,9 +1,12 @@
-use super::{CallConfigRequest, CallFuncResponse, RegisterResponse, StatusQuery};
+use super::{CallConfigRequest, CallFuncResponse, RegisterResponse, StatusQuery, TestRequest};
 use crate::{
     axum::get_port,
     result::{FuncResult, ResultFuture},
     runtime::Runtime,
-    runwasm::{call_func, get_status_by_name, Environment, FuncConfig, RegisterConfig},
+    runwasm::{
+        call_func, call_func_sync, get_status_by_name, get_test_env, set_test_env, Environment,
+        FuncConfig, RegisterConfig, Tester,
+    },
 };
 use axum::{
     extract::{Multipart, Query},
@@ -27,6 +30,7 @@ impl Server {
         RUNTIME.as_ref();
         let app = Router::new()
             .route("/register", post(Self::register))
+            .route("/test", post(Self::test))
             .route("/init", get(Self::init))
             .route("/call", post(Self::call_func))
             .route("/status", get(Self::get_status))
@@ -35,14 +39,33 @@ impl Server {
         let addr = SocketAddr::from(([0, 0, 0, 0], get_port()));
         tracing::info!("listening on {}", addr);
 
+        let handle = tokio::task::spawn_blocking(|| loop {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            if let Some(tester) = get_test_env() {
+                // tracing::info!("call_func_sync tid {}", gettid());
+                match call_func_sync(tester.env, tester.conf) {
+                    Ok(time) => {
+                        tester.result.set_result(&format!("{:?}", time));
+                        tester.result.set_completed();
+                    }
+                    Err(err) => {
+                        tester.result.set_result(&err.to_string());
+                        tester.result.set_completed();
+                    }
+                };
+            }
+        });
+
         axum::Server::bind(&addr)
             .serve(app.into_make_service())
             .await
             .unwrap();
+        handle.await.unwrap();
     }
 
     /// route: /register
     async fn register(mut multipart: Multipart) -> Json<RegisterResponse> {
+        // tracing::info!("register tid = {}", nix::unistd::gettid());
         let mut reponse = RegisterResponse {
             status: "Error".to_owned(),
             url: "null".to_owned(),
@@ -71,6 +94,43 @@ impl Server {
             };
         }
         Json(reponse)
+    }
+
+    async fn test(Json(test_config): Json<TestRequest>) -> Json<CallFuncResponse> {
+        // tracing::info!("test tid = {}", nix::unistd::gettid());
+        let mut response = CallFuncResponse {
+            status: "Error".to_owned(),
+            result: "null".to_owned(),
+        };
+        let name = test_config.wasm_name.to_owned();
+        let mut status = false;
+
+        match FuncConfig::from(test_config) {
+            Ok(func_config) => {
+                let func_result = Arc::new(FuncResult::new());
+                ENV_MAP.with(|map| {
+                    if let Some(env) = map.borrow().get(&name) {
+                        let env = env.clone();
+                        set_test_env(Tester {
+                            env,
+                            conf: func_config,
+                            result: func_result.clone(),
+                        });
+                        status = true;
+                    } else {
+                        response.status = "Error_Invalid_wasm_name".to_owned();
+                    }
+                });
+                if status {
+                    let res = Self::get_result(&func_result).await;
+                    response.status = "Success".to_owned();
+                    response.result = res;
+                }
+            }
+            Err(err) => response.status = format!("Error_{}", err),
+        };
+
+        Json(response)
     }
 
     /// route: /init
@@ -103,6 +163,7 @@ impl Server {
 
     /// route: /call
     async fn call_func(Json(call_config): Json<CallConfigRequest>) -> Json<CallFuncResponse> {
+        // tracing::info!("call tid = {}", nix::unistd::gettid());
         let mut response = CallFuncResponse {
             status: "Error".to_owned(),
             result: "null".to_owned(),
@@ -139,6 +200,7 @@ impl Server {
     }
 
     async fn get_result(func_result: &Arc<FuncResult>) -> String {
+        // tracing::info!("get_result tid = {}", nix::unistd::gettid());
         ResultFuture {
             result: func_result.clone(),
         }

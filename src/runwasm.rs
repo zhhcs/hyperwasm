@@ -1,12 +1,41 @@
-use crate::{axum::CallConfigRequest, result::FuncResult, runtime::Runtime, task::SchedulerStatus};
+use crate::{
+    axum::{CallConfigRequest, TestRequest},
+    result::FuncResult,
+    runtime::Runtime,
+    task::SchedulerStatus,
+};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, fmt, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+    fmt,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use wasmtime::{Engine, Linker, Module, Store};
 use wasmtime_wasi::{sync::WasiCtxBuilder, WasiCtx};
 
 thread_local! {
     static NAME_ID: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
+}
+
+lazy_static::lazy_static! {
+    static ref TEST_QUEUE: Arc<Mutex<VecDeque<Tester>>> = Arc::new(Mutex::new(VecDeque::new()));
+}
+
+pub fn set_test_env(tester: Tester) {
+    if let Ok(queue) = TEST_QUEUE.lock().as_mut() {
+        queue.push_back(tester);
+    }
+}
+
+pub fn get_test_env() -> Option<Tester> {
+    if let Ok(queue) = TEST_QUEUE.lock().as_mut() {
+        queue.pop_front()
+    } else {
+        None
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -30,6 +59,13 @@ impl RegisterConfig {
     pub fn get_path(&self) -> &str {
         &self.path
     }
+}
+
+#[derive(Clone)]
+pub struct Tester {
+    pub env: Environment,
+    pub conf: FuncConfig,
+    pub result: Arc<FuncResult>,
 }
 
 #[derive(Clone)]
@@ -100,6 +136,31 @@ impl FuncConfig {
             Err(err) => Err(err),
         }
     }
+
+    pub fn from(test_config: TestRequest) -> Result<FuncConfig, Error> {
+        match cvt_params(test_config.param_type, test_config.params) {
+            Ok(params) => {
+                let results_len = test_config.results_length.parse().unwrap_or(0);
+                let results;
+                if params.len() == 0 {
+                    results = vec![wasmtime::Val::from(0); results_len];
+                } else {
+                    results = vec![params[0].clone(); results_len];
+                }
+                // tracing::info!("params: {:?}", params);
+                let fc = FuncConfig {
+                    task_unique_name: "anon".to_owned(),
+                    export_func: test_config.export_func,
+                    params,
+                    results,
+                    expected_execution_time: 0,
+                    relative_deadline: 0,
+                };
+                Ok(fc)
+            }
+            Err(err) => Err(err),
+        }
+    }
 }
 
 fn cvt_params(param_type: String, params: Vec<String>) -> Result<Vec<wasmtime::Val>, Error> {
@@ -150,8 +211,8 @@ fn cvt_params(param_type: String, params: Vec<String>) -> Result<Vec<wasmtime::V
     }
 }
 
-#[deprecated]
-pub fn call_func_sync(env: Environment, mut conf: FuncConfig) -> Result<Vec<wasmtime::Val>, Error> {
+pub fn call_func_sync(env: Environment, mut conf: FuncConfig) -> Result<Duration, Error> {
+    let start = std::time::Instant::now();
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .inherit_args()?
@@ -163,7 +224,9 @@ pub fn call_func_sync(env: Environment, mut conf: FuncConfig) -> Result<Vec<wasm
     if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
         match caller.call(&mut store, &conf.params, &mut conf.results) {
             Ok(_) => {
-                return Ok(conf.results);
+                let end = std::time::Instant::now();
+                let time = end - start;
+                return Ok(time);
             }
             Err(err) => return Err(err),
         };
@@ -202,15 +265,14 @@ pub fn call_func(
         let func = move || match caller.call(&mut store, &conf.params, &mut conf.results) {
             Ok(_) => {
                 tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
-
-                func_result.set_completed();
                 func_result.set_result(&format!("{:?}", conf.results));
+                func_result.set_completed();
                 Ok(conf.results)
             }
             Err(err) => {
                 tracing::warn!("run_wasm_error: {}", err);
-                func_result.set_completed();
                 func_result.set_result(&format!("{:?}", err));
+                func_result.set_completed();
                 Err(err)
             }
         };

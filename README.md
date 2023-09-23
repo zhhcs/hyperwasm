@@ -6,10 +6,11 @@ sudo ./target/release/examples/server
 
 curl -F "fib.wasm=@/home/ubuntu/dev/hyper-scheduler/examples/fib.wasm" http://127.0.0.1:3001/register
 
+/call
 curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","task_unique_name":"fibabc","export_func":"fib","param_type":"i32","params":["30"],"results_length":"1","expected_execution_time":"20","relative_deadline":"30"}' -X POST http://127.0.0.1:3001/call
 
-这一条过时了
-curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_func":"fib","param_type":"i32","params":["32"],"results_length":"1"}' -X POST http://127.0.0.1:3001/call
+/test
+curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_func":"fib","param_type":"i32","params":["32"],"results_length":"1"}' -X POST http://127.0.0.1:3001/test
 
 ```
 0. 在设置任务的预期执行时间前先测试该任务在本机环境下的执行时长

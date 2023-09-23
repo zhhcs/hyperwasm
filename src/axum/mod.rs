@@ -26,6 +26,15 @@ pub struct CallConfigRequest {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct TestRequest {
+    pub wasm_name: String,      //指定的wasm文件名
+    pub export_func: String,    //调用的导出函数名称
+    pub param_type: String,     //数据类型
+    pub params: Vec<String>,    //数组
+    pub results_length: String, //结果长度
+}
+
+#[derive(Serialize, Deserialize)]
 struct RegisterResponse {
     status: String,
     url: String,
