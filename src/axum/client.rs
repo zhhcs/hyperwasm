@@ -1,6 +1,6 @@
 use crate::{axum::get_port, runwasm::RegisterConfig};
 
-use super::CallConfigRequest;
+use super::{CallConfigRequest, TestRequest};
 
 pub struct Client {
     client: reqwest::Client,
@@ -19,6 +19,22 @@ impl Client {
         let resp = self
             .client
             .get(url)
+            .header("Content-Type", "application/json")
+            .body(json.clone())
+            .send()
+            .await?;
+
+        let body = resp.text().await?;
+        tracing::info!("Response: {}", body);
+        Ok(())
+    }
+
+    pub async fn test(&self, test_request: TestRequest) -> Result<(), reqwest::Error> {
+        let url = format!("http://127.0.0.1:{}/test", get_port());
+        let json = serde_json::to_string(&test_request).unwrap();
+        let resp = self
+            .client
+            .post(url)
             .header("Content-Type", "application/json")
             .body(json.clone())
             .send()

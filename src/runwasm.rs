@@ -74,6 +74,7 @@ pub struct Environment {
     engine: Engine,
     module: Module,
     linker: Arc<Linker<WasiCtx>>,
+    test_time: Option<u64>,
 }
 
 impl Environment {
@@ -90,11 +91,20 @@ impl Environment {
             engine,
             module,
             linker: Arc::new(linker),
+            test_time: None,
         })
     }
 
     pub fn get_wasm_name(&self) -> &str {
         &self.wasm_name
+    }
+
+    pub fn set_test_time(&mut self, test_time: u64) {
+        self.test_time = Some(test_time);
+    }
+
+    pub fn get_test_time(&self) -> u64 {
+        self.test_time.unwrap_or(0)
     }
 }
 
@@ -160,6 +170,10 @@ impl FuncConfig {
             }
             Err(err) => Err(err),
         }
+    }
+
+    pub fn get_relative_deadline(&self) -> u64 {
+        self.relative_deadline
     }
 }
 
@@ -259,12 +273,12 @@ pub fn call_func(
         conf.expected_execution_time,
     ));
     let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
-    let task_unique_name = conf.task_unique_name.clone();
+    // let task_unique_name = conf.task_unique_name.clone();
     let func_result = func_result.clone();
     if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
         let func = move || match caller.call(&mut store, &conf.params, &mut conf.results) {
             Ok(_) => {
-                tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
+                // tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
                 func_result.set_result(&format!("{:?}", conf.results));
                 func_result.set_completed();
                 Ok(conf.results)

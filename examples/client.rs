@@ -1,5 +1,5 @@
 use hyper_scheduler::{
-    axum::{client::Client, CallConfigRequest},
+    axum::{client::Client, CallConfigRequest, TestRequest},
     runwasm::RegisterConfig,
 };
 
@@ -15,10 +15,20 @@ async fn main() {
 
     let client = Client::new();
     let config = RegisterConfig::new(
-        "/home/ubuntu/dev/hyper-scheduler/examples/fib.wasm",
+        "/home/zhanghao/dev/hyper-scheduler/examples/fib.wasm",
         "fib.wasm",
     );
     let _ = client.init(&config).await;
+
+    let test_config = TestRequest {
+        wasm_name: "fib.wasm".to_owned(),
+        export_func: "fib".to_owned(),
+        param_type: "i32".to_owned(),
+        params: vec!["34".to_owned()],
+        results_length: "1".to_owned(),
+    };
+
+    let _ = client.test(test_config).await;
 
     let call_config = CallConfigRequest {
         wasm_name: "fib.wasm".to_owned(),
@@ -27,8 +37,8 @@ async fn main() {
         param_type: "i32".to_owned(),
         params: vec!["34".to_owned()],
         results_length: "1".to_owned(),
-        expected_execution_time: "10".to_owned(),
-        relative_deadline: "20".to_owned(),
+        expected_execution_time: "0".to_owned(),
+        relative_deadline: "1".to_owned(),
     };
     let _ = client.call(&call_config).await;
 }

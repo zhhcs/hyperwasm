@@ -45,7 +45,8 @@ impl Server {
                 // tracing::info!("call_func_sync tid {}", gettid());
                 match call_func_sync(tester.env, tester.conf) {
                     Ok(time) => {
-                        tester.result.set_result(&format!("{:?}", time));
+                        let res = format!("{:?}", time.as_millis() + 1);
+                        tester.result.set_result(&res);
                         tester.result.set_completed();
                     }
                     Err(err) => {
@@ -123,8 +124,15 @@ impl Server {
                 });
                 if status {
                     let res = Self::get_result(&func_result).await;
+                    if let Ok(time) = res.parse::<u64>() {
+                        ENV_MAP.with(|map| {
+                            map.borrow_mut().get_mut(&name).unwrap().set_test_time(time)
+                        });
+                        response.result = time.to_string();
+                    } else {
+                        response.result = res;
+                    }
                     response.status = "Success".to_owned();
-                    response.result = res;
                 }
             }
             Err(err) => response.status = format!("Error_{}", err),
@@ -176,13 +184,16 @@ impl Server {
                 let func_result = Arc::new(FuncResult::new());
                 ENV_MAP.with(|map| {
                     if let Some(env) = map.borrow().get(&name) {
-                        let env = env.clone();
-                        match call_func(&RUNTIME, env, func_config, &func_result) {
-                            Ok(_) => {
-                                status = true;
-                            }
-                            Err(err) => response.status = format!("Error_{}", err),
-                        };
+                        let test_time = env.get_test_time();
+                        if func_config.get_relative_deadline() >= test_time {
+                            let env = env.clone();
+                            match call_func(&RUNTIME, env, func_config, &func_result) {
+                                Ok(_) => {
+                                    status = true;
+                                }
+                                Err(err) => response.status = format!("Error_{}", err),
+                            };
+                        }
                     } else {
                         response.status = "Error_Invalid_wasm_name".to_owned();
                     }

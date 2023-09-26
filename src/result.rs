@@ -29,7 +29,6 @@ impl FuncResult {
     pub fn set_completed(&self) {
         if let Ok(mut completed) = self.completed.lock() {
             *completed = true;
-            tracing::info!("set completed");
             if let Ok(mut waker) = self.waker.lock() {
                 if let Some(waker) = waker.take() {
                     waker.wake();
@@ -41,7 +40,6 @@ impl FuncResult {
     pub fn set_result(&self, str: &str) {
         if let Ok(mut result) = self.result.lock() {
             result.replace(str.to_owned());
-            tracing::info!("set result {}", str);
         }
     }
 }
