@@ -64,7 +64,6 @@ impl RegisterConfig {
 #[derive(Clone)]
 pub struct Tester {
     pub env: Environment,
-    pub conf: FuncConfig,
     pub result: Arc<FuncResult>,
 }
 
@@ -74,7 +73,7 @@ pub struct Environment {
     engine: Engine,
     module: Module,
     linker: Arc<Linker<WasiCtx>>,
-    test_time: Option<u64>,
+    func_config: Option<FuncConfig>,
 }
 
 impl Environment {
@@ -91,8 +90,16 @@ impl Environment {
             engine,
             module,
             linker: Arc::new(linker),
-            test_time: None,
+            func_config: None,
         })
+    }
+
+    pub fn set_func_config(&mut self, config: FuncConfig) {
+        self.func_config = Some(config);
+    }
+
+    pub fn get_func_config(&self) -> Option<FuncConfig> {
+        self.func_config.clone()
     }
 
     pub fn get_wasm_name(&self) -> &str {
@@ -100,11 +107,17 @@ impl Environment {
     }
 
     pub fn set_test_time(&mut self, test_time: u64) {
-        self.test_time = Some(test_time);
+        if let Some(func_config) = &mut self.func_config {
+            func_config.set_expected_execution_time(test_time);
+        }
     }
 
     pub fn get_test_time(&self) -> u64 {
-        self.test_time.unwrap_or(0)
+        if let Some(func_config) = &self.func_config {
+            func_config.get_expected_execution_time()
+        } else {
+            0
+        }
     }
 }
 
@@ -139,7 +152,7 @@ impl FuncConfig {
                         .expected_execution_time
                         .parse::<u64>()
                         .unwrap_or(0),
-                    relative_deadline: call_config.relative_deadline.parse::<u64>().unwrap_or(0),
+                    relative_deadline: call_config.expected_deadline.parse::<u64>().unwrap_or(0),
                 };
                 Ok(fc)
             }
@@ -164,7 +177,7 @@ impl FuncConfig {
                     params,
                     results,
                     expected_execution_time: 0,
-                    relative_deadline: 0,
+                    relative_deadline: test_config.expected_deadline.parse().unwrap_or(0),
                 };
                 Ok(fc)
             }
@@ -172,8 +185,20 @@ impl FuncConfig {
         }
     }
 
+    pub fn set_relative_deadline(&mut self, relative_deadline: u64) {
+        self.relative_deadline = relative_deadline;
+    }
+
     pub fn get_relative_deadline(&self) -> u64 {
         self.relative_deadline
+    }
+
+    pub fn set_expected_execution_time(&mut self, expected_execution_time: u64) {
+        self.expected_execution_time = expected_execution_time;
+    }
+
+    pub fn get_expected_execution_time(&self) -> u64 {
+        self.expected_execution_time
     }
 }
 
@@ -225,8 +250,9 @@ fn cvt_params(param_type: String, params: Vec<String>) -> Result<Vec<wasmtime::V
     }
 }
 
-pub fn call_func_sync(env: Environment, mut conf: FuncConfig) -> Result<Duration, Error> {
+pub fn call_func_sync(env: Environment) -> Result<Duration, Error> {
     let start = std::time::Instant::now();
+    let mut conf = env.get_func_config().unwrap();
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .inherit_args()?
@@ -257,6 +283,9 @@ pub fn call_func(
 ) -> Result<(u64, String), Error> {
     if conf.relative_deadline <= conf.expected_execution_time {
         return Err(wasmtime::Error::msg("Invalid_deadline").context("Invalid_deadline"));
+    }
+    if conf.task_unique_name.eq("anon") {
+        conf.task_unique_name = format!("anon{:?}", std::time::Instant::now());
     }
     if NAME_ID.with(|map| map.borrow().contains_key(conf.task_unique_name.as_str())) {
         return Err(wasmtime::Error::msg("Invalid_unique_name").context("Invalid_unique_name"));

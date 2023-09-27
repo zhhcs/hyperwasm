@@ -1,4 +1,6 @@
-use super::{CallConfigRequest, CallFuncResponse, RegisterResponse, StatusQuery, TestRequest};
+use super::{
+    CallConfigRequest, CallFuncResponse, CallWithName, RegisterResponse, StatusQuery, TestRequest,
+};
 use crate::{
     axum::get_port,
     result::{FuncResult, ResultFuture},
@@ -31,6 +33,7 @@ impl Server {
         let app = Router::new()
             .route("/register", post(Self::register))
             .route("/test", post(Self::test))
+            .route("/call_with_name", post(Self::call_with_name))
             .route("/init", get(Self::init))
             .route("/call", post(Self::call_func))
             .route("/status", get(Self::get_status))
@@ -43,7 +46,7 @@ impl Server {
             std::thread::sleep(std::time::Duration::from_millis(10));
             if let Some(tester) = get_test_env() {
                 // tracing::info!("call_func_sync tid {}", gettid());
-                match call_func_sync(tester.env, tester.conf) {
+                match call_func_sync(tester.env) {
                     Ok(time) => {
                         let res = format!("{:?}", time.as_millis() + 1);
                         tester.result.set_result(&res);
@@ -110,11 +113,11 @@ impl Server {
             Ok(func_config) => {
                 let func_result = Arc::new(FuncResult::new());
                 ENV_MAP.with(|map| {
-                    if let Some(env) = map.borrow().get(&name) {
+                    if let Some(env) = map.borrow_mut().get_mut(&name) {
+                        env.set_func_config(func_config);
                         let env = env.clone();
                         set_test_env(Tester {
                             env,
-                            conf: func_config,
                             result: func_result.clone(),
                         });
                         status = true;
@@ -169,6 +172,36 @@ impl Server {
         Json(reponse)
     }
 
+    async fn call_with_name(Json(name): Json<CallWithName>) -> Json<CallFuncResponse> {
+        let mut response = CallFuncResponse {
+            status: "Error".to_owned(),
+            result: "null".to_owned(),
+        };
+        let mut status = false;
+        let func_result = Arc::new(FuncResult::new());
+        ENV_MAP.with(|map| {
+            if let Some(env) = map.borrow().get(&name.wasm_name) {
+                if let Some(func_config) = env.get_func_config() {
+                    let env = env.clone();
+                    match call_func(&RUNTIME, env, func_config, &func_result) {
+                        Ok(_) => {
+                            status = true;
+                        }
+                        Err(err) => response.status = format!("Error_{}", err),
+                    };
+                }
+            } else {
+                response.status = "Error_Invalid_wasm_name".to_owned();
+            }
+        });
+        if status {
+            let res = Self::get_result(&func_result).await;
+            response.status = "Success".to_owned();
+            response.result = res;
+        }
+        Json(response)
+    }
+
     /// route: /call
     async fn call_func(Json(call_config): Json<CallConfigRequest>) -> Json<CallFuncResponse> {
         // tracing::info!("call tid = {}", nix::unistd::gettid());
@@ -184,6 +217,7 @@ impl Server {
                 let func_result = Arc::new(FuncResult::new());
                 ENV_MAP.with(|map| {
                     if let Some(env) = map.borrow().get(&name) {
+                        tracing::info!("{:?}", env.get_func_config());
                         let test_time = env.get_test_time();
                         if func_config.get_relative_deadline() >= test_time {
                             let env = env.clone();

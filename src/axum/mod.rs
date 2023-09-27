@@ -22,16 +22,17 @@ pub struct CallConfigRequest {
     pub params: Vec<String>,             //数组
     pub results_length: String,          //结果长度
     pub expected_execution_time: String, //预期执行时长(必须小于相对截止时间，单位毫秒)
-    pub relative_deadline: String,       //相对截止时间(单位毫秒)
+    pub expected_deadline: String,       //相对截止时间(单位毫秒)
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct TestRequest {
-    pub wasm_name: String,      //指定的wasm文件名
-    pub export_func: String,    //调用的导出函数名称
-    pub param_type: String,     //数据类型
-    pub params: Vec<String>,    //数组
-    pub results_length: String, //结果长度
+    pub wasm_name: String,         //指定的wasm文件名
+    pub export_func: String,       //调用的导出函数名称
+    pub param_type: String,        //数据类型
+    pub params: Vec<String>,       //数组
+    pub results_length: String,    //结果长度
+    pub expected_deadline: String, //预期截止时间(单位ms)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,4 +45,9 @@ struct RegisterResponse {
 struct CallFuncResponse {
     status: String,
     result: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CallWithName {
+    wasm_name: String,
 }

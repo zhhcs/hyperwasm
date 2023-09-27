@@ -26,6 +26,7 @@ async fn main() {
         param_type: "i32".to_owned(),
         params: vec!["34".to_owned()],
         results_length: "1".to_owned(),
+        expected_deadline: "10".to_owned(),
     };
 
     let _ = client.test(test_config).await;
@@ -38,7 +39,7 @@ async fn main() {
         params: vec!["34".to_owned()],
         results_length: "1".to_owned(),
         expected_execution_time: "0".to_owned(),
-        relative_deadline: "1".to_owned(),
+        expected_deadline: "1".to_owned(),
     };
     let _ = client.call(&call_config).await;
 }
