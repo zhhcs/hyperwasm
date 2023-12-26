@@ -1,3 +1,5 @@
+use anyhow::Error;
+
 use crate::{
     scheduler::Scheduler,
     task::{Coroutine, SchedulerStatus},
@@ -23,6 +25,84 @@ impl Runtime {
         Runtime { scheduler, threads }
     }
 
+    pub fn admission_control_result(
+        &self,
+        expected_execution_time: Option<Duration>,
+        relative_deadline: Option<Duration>,
+    ) -> (AdmissionControl, Option<SchedulerStatus>) {
+        if relative_deadline.is_none() || expected_execution_time.is_none() {
+            return (AdmissionControl::NOTREALTIME, None);
+        }
+        let mut co_stat = SchedulerStatus::new(expected_execution_time, relative_deadline);
+        let id = crate::task::get_id();
+        co_stat.init(id);
+        (self.is_schedulable(&co_stat), Some(co_stat))
+    }
+
+    pub fn micro_process<F, T>(
+        &self,
+        f: F,
+        ac: AdmissionControl,
+        status: Option<SchedulerStatus>,
+    ) -> Result<u64, Error>
+    where
+        F: FnOnce() -> T,
+        F: Send + 'static,
+        T: Send + 'static,
+    {
+        let func = Box::new(move || {
+            let _ = panic::catch_unwind(AssertUnwindSafe(f));
+        });
+        match ac {
+            AdmissionControl::NOTREALTIME => {
+                let co = Coroutine::new(func, StackSize::default(), false, None, None);
+                let stat = co.get_schedulestatus();
+                let id = co.get_co_id();
+                if let Ok(()) = self.scheduler.push(co, false) {
+                    self.scheduler.update_status(id, stat);
+                    return Ok(id);
+                } else {
+                    tracing::error!("spawn failed");
+                    return Err(Error::msg("spawn failed"));
+                };
+            }
+            AdmissionControl::PREEMPTIVE => {
+                let co = Coroutine::from_status(func, status.unwrap());
+                let id = co.get_co_id();
+                self.scheduler.set_slot(co);
+
+                let sigval = libc::sigval {
+                    sival_ptr: 0 as *mut libc::c_void,
+                };
+                let ret = unsafe {
+                    libc::pthread_sigqueue(
+                        crate::scheduler::PTHREADTID,
+                        crate::scheduler::PREEMPTY as i32,
+                        sigval,
+                    )
+                };
+                assert!(ret == 0);
+                return Ok(id);
+            }
+            AdmissionControl::SCHEDULABLE => {
+                let co = Coroutine::from_status(func, status.unwrap());
+                let stat = co.get_schedulestatus();
+                let id = co.get_co_id();
+                if let Ok(()) = self.scheduler.push(co, true) {
+                    self.scheduler.update_status(id, stat);
+                    return Ok(id);
+                } else {
+                    tracing::error!("spawn failed");
+                    return Err(Error::msg("spawn failed"));
+                };
+            }
+            _ => {
+                return Err(Error::msg("spawn failed, cause: UNSCHEDULABLE"));
+            }
+        }
+    }
+
+    // #[deprecated]
     pub fn spawn<F, T>(
         &self,
         f: F,
@@ -59,7 +139,7 @@ impl Runtime {
             };
         } else {
             match self.is_schedulable(&stat) {
-                AdmissionControll::PREEMPTIVE => {
+                AdmissionControl::PREEMPTIVE => {
                     self.scheduler.set_slot(co);
 
                     let sigval = libc::sigval {
@@ -76,7 +156,7 @@ impl Runtime {
                     // tracing::info!("sig {:?}", now);
                     assert!(ret == 0);
                 }
-                AdmissionControll::SCHEDULABLE => {
+                AdmissionControl::SCHEDULABLE => {
                     if let Ok(()) = self.scheduler.push(co, true) {
                         self.scheduler.update_status(id, stat);
                     } else {
@@ -87,7 +167,7 @@ impl Runtime {
                         ));
                     };
                 }
-                AdmissionControll::UNSCHEDULABLE => {
+                AdmissionControl::UNSCHEDULABLE => {
                     // tracing::warn!("id = {} spawn failed, cause: UNSCHEDULABLE", co.get_co_id());
                     self.scheduler.cancell(co);
                     return Err(std::io::Error::new(
@@ -95,16 +175,17 @@ impl Runtime {
                         "spawn failed, cause: UNSCHEDULABLE",
                     ));
                 }
+                AdmissionControl::NOTREALTIME => (),
             };
         }
         Ok(id)
     }
 
-    fn is_schedulable(&self, co_stat: &SchedulerStatus) -> AdmissionControll {
+    fn is_schedulable(&self, co_stat: &SchedulerStatus) -> AdmissionControl {
         while let Some(mut status_map) = self.scheduler.get_status() {
             if status_map.is_empty() {
                 // tracing::info!("case 1");
-                return AdmissionControll::SCHEDULABLE;
+                return AdmissionControl::SCHEDULABLE;
             }
             let curr: u64 = self.scheduler.get_curr_running_id();
 
@@ -134,7 +215,7 @@ impl Runtime {
                 });
             } else {
                 // tracing::info!("case 2");
-                return AdmissionControll::PREEMPTIVE;
+                return AdmissionControl::PREEMPTIVE;
             }
 
             let mut stat_vec = BinaryHeap::new();
@@ -158,19 +239,19 @@ impl Runtime {
                     // tracing::info!("tr: {},ddl: {}", total_remaining, deadline);
                     if util > 1.0 {
                         // tracing::info!("case 3");
-                        return AdmissionControll::UNSCHEDULABLE;
+                        return AdmissionControl::UNSCHEDULABLE;
                     }
                 }
             }
 
             if s1.eq(&co_stat) {
                 // tracing::info!("case 4");
-                return AdmissionControll::PREEMPTIVE;
+                return AdmissionControl::PREEMPTIVE;
             }
             break;
         }
         // tracing::info!("case 5");
-        AdmissionControll::SCHEDULABLE
+        AdmissionControl::SCHEDULABLE
     }
 
     pub fn get_status_by_id(&self, id: u64) -> Option<SchedulerStatus> {
@@ -205,7 +286,9 @@ impl Drop for Runtime {
     }
 }
 
-enum AdmissionControll {
+#[derive(PartialEq)]
+pub enum AdmissionControl {
+    NOTREALTIME,
     PREEMPTIVE,
     SCHEDULABLE,
     UNSCHEDULABLE,

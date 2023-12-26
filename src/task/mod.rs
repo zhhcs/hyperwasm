@@ -16,7 +16,7 @@ use std::{mem, ptr};
 
 pub static mut ID: AtomicU64 = AtomicU64::new(1);
 
-fn get_id() -> u64 {
+pub fn get_id() -> u64 {
     unsafe { ID.fetch_add(1, Ordering::SeqCst) }
 }
 
@@ -111,7 +111,7 @@ pub struct SchedulerStatus {
 }
 
 impl SchedulerStatus {
-    fn new(
+    pub fn new(
         expected_execution_time: Option<Duration>,
         relative_deadline: Option<Duration>,
     ) -> SchedulerStatus {
@@ -130,7 +130,7 @@ impl SchedulerStatus {
         }
     }
 
-    fn init(&mut self, id: u64) {
+    pub fn init(&mut self, id: u64) {
         self.co_id = id;
         if let Some(rd) = self.relative_deadline {
             self.absolute_deadline = Some(self.spawn_time + rd);
@@ -223,6 +223,22 @@ unsafe impl Send for Coroutine {}
 
 #[allow(invalid_value)]
 impl Coroutine {
+    pub fn from_status(f: Box<dyn FnOnce()>, status: SchedulerStatus) -> Box<Coroutine> {
+        let mut co = Box::new(Coroutine {
+            f: Option::Some(f),
+            context: None,
+            // context: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+            status: CoStatus::PENDING,
+            panicking: None,
+            id: status.co_id,
+            stack_size: StackSize::default(),
+            schedule_status: status,
+        });
+        co.schedule_status
+            .update_status(co.schedule_status.spawn_time, CoStatus::PENDING);
+        co
+    }
+
     pub fn new(
         f: Box<dyn FnOnce()>,
         stack_size: StackSize,

@@ -362,7 +362,7 @@ impl Server {
         tracing::info!(
             "CNT_RESPONSE: {}, CNT_SPAWN: {}",
             CNT_RESPONSE.load(std::sync::atomic::Ordering::Relaxed),
-            crate::runwasm::CNT_SPAWN.load(std::sync::atomic::Ordering::Relaxed)
+            crate::runwasm::CNT_ADMISSION_CONTROL.load(std::sync::atomic::Ordering::Relaxed)
         );
         THROUGHPUT.with(|throughput| {
             throughput.borrow().iter().for_each(|tuple| {

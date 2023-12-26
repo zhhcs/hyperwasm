@@ -86,7 +86,7 @@ impl Client {
             .await?;
 
         let end = std::time::Instant::now();
-        // tracing::info!("call response: {:?}", end - start);
+        tracing::info!("call response: {:?}", end - start);
         let _body = resp.text().await?;
         // tracing::info!("res: {}", body);
         Ok(end - start)

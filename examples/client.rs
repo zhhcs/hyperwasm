@@ -30,9 +30,9 @@ async fn main() {
     let mut rng = rand::thread_rng();
 
     let mut cfgs = Vec::new();
-    for i in 0..100 {
+    for i in 0..1000 {
         let client = Client::new();
-        let (num, t1, t2) = (27, 1, rng.gen_range(2..20));
+        let (num, t1, t2) = (27, 1, 20);
         // if i % 2 == 0 {
         //     (20, 1, rng.gen_range(2..10))
         // } else {
@@ -75,7 +75,7 @@ async fn main() {
 }
 
 async fn req(client: Client, mut cfg: CallConfigRequest) {
-    for i in 0..200 {
+    for i in 0..2000 {
         cfg.task_unique_name.push_str(&format!("_{}", i));
         let _ = client.call(&cfg).await;
     }
