@@ -70,7 +70,7 @@ impl Worker {
             String::from("worker"),
         );
         cg_worker.set_threaded();
-        cg_worker.set_cpuset(1, None);
+        cg_worker.set_cpuset(2, None);
         cg_worker.set_cgroup_threads(tid);
     }
 

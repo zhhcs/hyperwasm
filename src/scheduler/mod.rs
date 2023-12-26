@@ -183,7 +183,7 @@ impl Scheduler {
             ],
             None,
         );
-        hypersched.set_cpuset(0, Some(1));
+        hypersched.set_cpuset(0, Some(3));
         hypersched.set_cgroup_procs(nix::unistd::gettid());
 
         let cg_main = cgroupv2::Controllerv2::new(
@@ -236,6 +236,12 @@ impl Scheduler {
     pub fn cancell(&self, co: Box<Coroutine>) {
         if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
             q.push_back(co);
+        }
+    }
+
+    pub fn drop_co(&self) {
+        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
+            q.iter_mut().for_each(|co| co.init());
         }
     }
 

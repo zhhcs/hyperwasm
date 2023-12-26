@@ -6,8 +6,12 @@ sudo ./target/release/examples/server
 
 curl -F "fib.wasm=@/home/zhanghao/dev/hyper-scheduler/examples/fib.wasm" http://127.0.0.1:3001/register
 
+curl -F "fib.wasm=@/tmp/122.96.144.180:30080/hywasm/fib46.wasm/latest/module.wasm" http://127.0.0.1:3001/register
+
 /call
-curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","task_unique_name":"fibabc","export_func":"fib","param_type":"i32","params":["30"],"results_length":"1","expected_execution_time":"20","expected_deadline":"30"}' -X POST http://127.0.0.1:3001/call
+curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","task_unique_name":"fibabc","export_func":"fib_r","param_type":"i32","params":["30"],"results_length":"1","expected_execution_time":"5","expected_deadline":"35"}' -X POST http://127.0.0.1:3001/call
+
+curl -H "Content-Type: application/json" -d '{"wasm_name":"detect.wasm","task_unique_name":"detectabc","export_func":"detect","param_type":"void","params":[],"results_length":"1","expected_execution_time":"215","expected_deadline":"300"}' -X POST http://127.0.0.1:3001/call
 
 /test
 curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_func":"fib","param_type":"i32","params":["32"],"results_length":"1","expected_deadline":"30"}' -X POST http://127.0.0.1:3001/test
@@ -59,3 +63,15 @@ FIXME: 不支持生成子任务
 
      流程：1). request(register) -> benchmark -> response(register status,expected_execution_time) 
           2). request(call, relative_deadline) -> expected_execution_time < relative_deadline? -> ... -> response
+
+
+
+
+          1. 冷热启动
+               
+                    
+
+          2. 智能交通
+
+
+          3. 吞吐量并发量     

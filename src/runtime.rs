@@ -88,7 +88,7 @@ impl Runtime {
                     };
                 }
                 AdmissionControll::UNSCHEDULABLE => {
-                    tracing::warn!("id = {} spawn failed, cause: UNSCHEDULABLE", co.get_co_id());
+                    // tracing::warn!("id = {} spawn failed, cause: UNSCHEDULABLE", co.get_co_id());
                     self.scheduler.cancell(co);
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -191,6 +191,10 @@ impl Runtime {
     // pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
     //     self.scheduler.get_completed_status()
     // }
+
+    pub fn drop_co(&self) {
+        self.scheduler.drop_co();
+    }
 }
 
 impl Drop for Runtime {

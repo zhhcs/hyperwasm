@@ -1,6 +1,7 @@
 mod context;
 mod page_size;
 pub mod stack;
+use crate::axum::server::LATENCY;
 use crate::scheduler::Scheduler;
 
 use self::context::{Context, Entry};
@@ -144,7 +145,7 @@ impl SchedulerStatus {
                 self.expected_remaining_execution_time = Some(eet - self.running_time);
             } else {
                 self.expected_remaining_execution_time = Some(eet);
-                tracing::warn!("id = {} out of expected execution time", self.get_co_id());
+                // tracing::warn!("id = {} out of expected execution time", self.get_co_id());
             }
         }
     }
@@ -292,7 +293,10 @@ impl Coroutine {
         co.schedule_status.update_running_time(now);
         co.schedule_status.update_remaining();
         co.schedule_status.update_status(now, CoStatus::COMPLETED);
-        // tracing::info!("{}, completed", co.get_co_id());
+        if let Ok(latency) = LATENCY.lock().as_mut() {
+            let time = (now - co.schedule_status.spawn_time).as_millis() as i32;
+            *latency.entry(time).or_insert(1) += 1;
+        }
         ThisThread::restore();
     }
 

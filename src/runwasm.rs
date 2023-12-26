@@ -22,7 +22,10 @@ thread_local! {
 
 lazy_static::lazy_static! {
     static ref TEST_QUEUE: Arc<Mutex<VecDeque<Tester>>> = Arc::new(Mutex::new(VecDeque::new()));
+    // pub static ref MODEL: Arc<ort::Session> = infer::detect::prepare_model();
 }
+
+pub static CNT_SPAWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub fn set_test_env(tester: Tester) {
     if let Ok(queue) = TEST_QUEUE.lock().as_mut() {
@@ -42,6 +45,7 @@ pub fn get_test_env() -> Option<Tester> {
 pub struct RegisterConfig {
     path: String,
     wasm_name: String,
+    is_infer: bool,
 }
 
 impl RegisterConfig {
@@ -49,7 +53,16 @@ impl RegisterConfig {
         RegisterConfig {
             path: path.to_string(),
             wasm_name: wasm_name.to_string(),
+            is_infer: false,
         }
+    }
+
+    pub fn set_infer(&mut self) {
+        self.is_infer = true;
+    }
+
+    pub fn is_infer(&self) -> bool {
+        self.is_infer
     }
 
     pub fn get_wasm_name(&self) -> &str {
@@ -77,14 +90,50 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new(config: &RegisterConfig) -> Result<Self, Error> {
+    pub async fn new(config: &RegisterConfig) -> Result<Self, Error> {
+        // let start = std::time::Instant::now();
         let wasm_name = config.get_wasm_name().to_owned();
         let engine = Engine::default();
         let module = Module::from_file(&engine, config.get_path())?;
 
         let mut linker = Linker::new(&engine);
         wasmtime_wasi::add_to_linker(&mut linker, |cx| cx)?;
+        // if config.is_infer {
+        //     linker.func_wrap("env", "llama2", move |temperature: f32| {
+        //         llama2rs::llama2(temperature);
+        //         Ok(())
+        //     })?;
+        /*// let model = infer::detect::prepare_model();
+        let model = MODEL.clone();
+        linker.func_wrap(
+            "env",
+            "infer",
+            move |mut caller: wasmtime::Caller<'_, _>,
+                  input_ptr: i32,
+                  input_len: i32,
+                  result_ptr: i32| {
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|ext| ext.into_memory())
+                    .ok_or_else(|| wasmtime::Trap::MemoryOutOfBounds)?;
 
+                let mem = memory.data_mut(&mut caller);
+                let string_data =
+                    &mem[(input_ptr as usize)..((input_ptr + input_len) as usize)];
+
+                let string_value = String::from_utf8_lossy(string_data).to_string();
+
+                let buf = std::fs::read(string_value).unwrap_or(vec![]);
+                let boxes = infer::detect::detect_objects_on_image(&model, buf);
+
+                mem[result_ptr as usize..(result_ptr as usize + 8)]
+                    .copy_from_slice(&(boxes.len()).to_le_bytes());
+                Ok(())
+            },
+        )?;*/
+        // }
+        // let end = std::time::Instant::now();
+        // tracing::info!("init latency: {:?}", end - start);
         Ok(Self {
             wasm_name,
             engine,
@@ -140,7 +189,7 @@ impl FuncConfig {
                 if params.len() == 0 {
                     results = vec![wasmtime::Val::from(0); results_len];
                 } else {
-                    results = vec![params[0].clone(); results_len];
+                    results = vec![wasmtime::Val::from(1.2); results_len];
                 }
                 // tracing::info!("params: {:?}", params);
                 let fc = FuncConfig {
@@ -291,11 +340,17 @@ pub fn call_func(
     if NAME_ID.with(|map| map.borrow().contains_key(conf.task_unique_name.as_str())) {
         return Err(wasmtime::Error::msg("Invalid_unique_name").context("Invalid_unique_name"));
     }
+    // TODO:
+    // 疑似内存泄漏
+    //
+    // 1.创建SchedulerStatus
+    // 2.进行可调度性分析
+    // 3.准入再生成microprocess
+    //
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .inherit_args()?
         .build();
-
     let mut store = Store::new(&env.engine, wasi);
     let instance = env.linker.instantiate(&mut store, &env.module)?;
 
@@ -304,19 +359,21 @@ pub fn call_func(
     ));
     let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
     // let task_unique_name = conf.task_unique_name.clone();
-    let func_result = func_result.clone();
+    let func_result_1 = func_result.clone();
+    CNT_SPAWN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
         let func = move || match caller.call(&mut store, &conf.params, &mut conf.results) {
             Ok(_) => {
                 // tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
-                func_result.set_result(&format!("{:?}", conf.results));
-                func_result.set_completed();
+                func_result_1.set_result(&format!("{:?}", conf.results));
+                func_result_1.set_completed();
                 Ok(conf.results)
             }
             Err(err) => {
                 tracing::warn!("run_wasm_error: {}", err);
-                func_result.set_result(&format!("{:?}", err));
-                func_result.set_completed();
+                func_result_1.set_result(&format!("{:?}", err));
+                func_result_1.set_completed();
                 Err(err)
             }
         };
@@ -326,7 +383,11 @@ pub fn call_func(
                 NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
                 return Ok((id, conf.task_unique_name));
             }
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                func_result.set_result(&format!("{:?}", err));
+                func_result.set_completed();
+                return Err(err.into());
+            }
         }
     } else {
         return Err(wasmtime::Error::msg("Invalid_export_func").context("Invalid_export_func"));
