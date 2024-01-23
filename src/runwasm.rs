@@ -25,9 +25,6 @@ lazy_static::lazy_static! {
     // pub static ref MODEL: Arc<ort::Session> = infer::detect::prepare_model();
 }
 
-pub static CNT_ADMISSION_CONTROL: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(0);
-
 pub fn set_test_env(tester: Tester) {
     if let Ok(queue) = TEST_QUEUE.lock().as_mut() {
         queue.push_back(tester);
@@ -400,62 +397,31 @@ pub fn call_func(
     //
     // Fixed 2023/12/26 21:30
 
+    // TODO:
+    // 似乎有什么东西导致超时了
+    // 暂时不知道怎么搞
+    // 可以把预期执行时长写久一点
+
     let expected_execution_time = Some(std::time::Duration::from_millis(
         conf.expected_execution_time,
     ));
     let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
 
     let res = rt.admission_control_result(expected_execution_time, relative_deadline);
-    CNT_ADMISSION_CONTROL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
+    // instantiate(
+    //     rt,
+    //     env,
+    //     conf,
+    //     func_result,
+    //     AdmissionControl::SCHEDULABLE,
+    //     res.1,
+    // )
     if res.0 == AdmissionControl::UNSCHEDULABLE {
         func_result.set_completed();
         Err(Error::msg("spawn failed, cause: UNSCHEDULABLE"))
     } else {
         instantiate(rt, env, conf, func_result, res.0, res.1)
     }
-
-    // let wasi = WasiCtxBuilder::new()
-    //     .inherit_stdio()
-    //     .inherit_args()?
-    //     .build();
-    // let mut store = Store::new(&env.engine, wasi);
-    // let instance = env.linker.instantiate(&mut store, &env.module)?;
-
-    // // let task_unique_name = conf.task_unique_name.clone();
-    // let func_result_1 = func_result.clone();
-    // CNT_SPAWN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-    // if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
-    //     let func = move || match caller.call(&mut store, &conf.params, &mut conf.results) {
-    //         Ok(_) => {
-    //             // tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
-    //             func_result_1.set_result(&format!("{:?}", conf.results));
-    //             func_result_1.set_completed();
-    //             Ok(conf.results)
-    //         }
-    //         Err(err) => {
-    //             tracing::warn!("run_wasm_error: {}", err);
-    //             func_result_1.set_result(&format!("{:?}", err));
-    //             func_result_1.set_completed();
-    //             Err(err)
-    //         }
-    //     };
-    //     let id = rt.spawn(func, expected_execution_time, relative_deadline);
-    //     match id {
-    //         Ok(id) => {
-    //             NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
-    //             return Ok((id, conf.task_unique_name));
-    //         }
-    //         Err(err) => {
-    //             func_result.set_result(&format!("{:?}", err));
-    //             func_result.set_completed();
-    //             return Err(err.into());
-    //         }
-    //     }
-    // } else {
-    //     return Err(wasmtime::Error::msg("Invalid_export_func").context("Invalid_export_func"));
-    // }
 }
 
 pub fn get_status_by_name(rt: &Runtime, unique_name: &str) -> Option<SchedulerStatus> {

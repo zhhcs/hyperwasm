@@ -48,7 +48,6 @@ lazy_static::lazy_static! {
 static CNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static CNT_27: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static CNT_30: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-static CNT_RESPONSE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 static CONNECTION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
@@ -83,7 +82,7 @@ impl Server {
             cg_tester.set_cpuset(3, None);
             cg_tester.set_cgroup_threads(nix::unistd::gettid());
             loop {
-                RUNTIME.as_ref().drop_co();
+                // RUNTIME.as_ref().drop_co();
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 if let Some(tester) = get_test_env() {
                     // tracing::info!("call_func_sync tid {}", gettid());
@@ -264,7 +263,7 @@ impl Server {
             result: "null".to_owned(),
         };
         let name = call_config.wasm_name.to_owned();
-        // let ddl = call_config.expected_deadline.clone();
+        let ddl = call_config.expected_deadline.clone();
         let mut status = false;
 
         let start = std::time::Instant::now();
@@ -275,32 +274,32 @@ impl Server {
                 ENV_MAP.with(|map| {
                     if let Some(env) = map.borrow().get(&name) {
                         // tracing::info!("{:?}", env.get_func_config());
-                        let test_time = env.get_test_time();
-                        if func_config.get_relative_deadline() >= test_time {
-                            let env = env.clone();
-                            match call_func(&RUNTIME, env, func_config, &func_result) {
-                                Ok(_) => {
-                                    let end = std::time::Instant::now();
-                                    warm_start = end - start;
-                                    // tracing::info!("{:?}", warm_start);
-                                    unsafe {
-                                        T += warm_start;
-                                    }
-                                    CNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                                    // if ddl == "20" {
-                                    //     CNT_27.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                                    // } else if ddl == "100" {
-                                    //     CNT_30.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                                    // }
-                                    // tracing::info!("warm-start: {:?}", end - start);
-                                    status = true;
+                        // let test_time = env.get_test_time();
+                        // if func_config.get_relative_deadline() >= test_time {
+                        let env = env.clone();
+                        match call_func(&RUNTIME, env, func_config, &func_result) {
+                            Ok(_) => {
+                                let end = std::time::Instant::now();
+                                warm_start = end - start;
+                                // tracing::info!("{:?}", warm_start);
+                                unsafe {
+                                    T += warm_start;
                                 }
-                                Err(err) => {
-                                    response.status = format!("Error_{}", err);
-                                    // tracing::info!("{}", err);
+                                CNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                if ddl == "20" {
+                                    CNT_27.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                } else if ddl == "100" {
+                                    CNT_30.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                 }
-                            };
-                        }
+                                // tracing::info!("warm-start: {:?}", end - start);
+                                status = true;
+                            }
+                            Err(err) => {
+                                response.status = format!("Error_{}", err);
+                                // tracing::info!("{}", err);
+                            }
+                        };
+                        // }
                     } else {
                         response.status = "Error_Invalid_wasm_name".to_owned();
                     }
@@ -314,7 +313,6 @@ impl Server {
             }
             Err(err) => response.status = format!("Error_{}", err),
         };
-        CNT_RESPONSE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         // let end_res = std::time::Instant::now();
         // tracing::info!("ddl: {}, response latency: {:?}", ddl, end_res - start);
         Json(response)
@@ -332,6 +330,16 @@ impl Server {
     async fn get_status() -> String {
         if let Some(status) = RUNTIME.get_status() {
             if status.len() == 0 {
+                if let Some(cs) = RUNTIME.get_completed_status() {
+                    let mut s = String::from("no task running\n");
+                    cs.iter().for_each(|(id, stat)| {
+                        s.push_str(&format!(
+                            "\nid: {}, status: {:?}\n{}",
+                            id, stat.co_status, stat
+                        ));
+                    });
+                    return s;
+                }
                 return "no task running".to_string();
             }
             let mut s = String::new();
@@ -359,19 +367,15 @@ impl Server {
     }
 
     async fn get_warm_start_latency() -> String {
-        tracing::info!(
-            "CNT_RESPONSE: {}, CNT_SPAWN: {}",
-            CNT_RESPONSE.load(std::sync::atomic::Ordering::Relaxed),
-            crate::runwasm::CNT_ADMISSION_CONTROL.load(std::sync::atomic::Ordering::Relaxed)
-        );
         THROUGHPUT.with(|throughput| {
             throughput.borrow().iter().for_each(|tuple| {
                 tracing::info!("{:?},{},{}", tuple.0, tuple.1, tuple.2);
             })
         });
+        let mut latency_res = String::new();
         if let Ok(latency) = LATENCY.lock() {
             latency.iter().for_each(|(time, cnt)| {
-                tracing::info!("latency: {}, cnt: {}", time, cnt);
+                latency_res.push_str(&format!("\nlatency: {}, cnt: {}", time, cnt));
             });
         }
         let cnt = CNT.load(std::sync::atomic::Ordering::Relaxed);
@@ -383,8 +387,8 @@ impl Server {
         }
         let start_latency = unsafe { T } / cnt;
         format!(
-            "cnt: {}, start_latency: {:?}, cnt27: {}, cnt30: {}",
-            cnt, start_latency, cnt27, cnt30
+            "cnt: {}, start_latency: {:?}, cnt27: {}, cnt30: {}, \nlatency: {}",
+            cnt, start_latency, cnt27, cnt30, latency_res
         )
     }
 

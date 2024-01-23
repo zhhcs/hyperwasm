@@ -14,7 +14,7 @@ async fn main() {
     tracing::info!("Starting");
 
     let mut cfgs = Vec::new();
-    for i in 0..50 {
+    for i in 0..5 {
         let client = Client::new();
         let call_cfg = CallConfigRequest {
             wasm_name: "chat.wasm".to_string(),

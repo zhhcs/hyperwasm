@@ -29,10 +29,10 @@ async fn main() {
         task_unique_name: "scc1".to_owned(),
         export_func: "fib_r".to_owned(),
         param_type: "i32".to_owned(),
-        params: vec!["30".to_string()],
+        params: vec!["35".to_string()],
         results_length: "1".to_owned(),
-        expected_execution_time: "4".to_owned(),
-        expected_deadline: "15".to_owned(),
+        expected_execution_time: "35".to_owned(),
+        expected_deadline: "50".to_owned(),
     };
     cfgs.push((client1, scc1));
 
@@ -55,12 +55,25 @@ async fn main() {
         task_unique_name: "scc3".to_owned(),
         export_func: "fib_r".to_owned(),
         param_type: "i32".to_owned(),
-        params: vec!["30".to_string()],
+        params: vec!["27".to_string()],
         results_length: "1".to_owned(),
-        expected_execution_time: "4".to_owned(),
-        expected_deadline: "15".to_owned(),
+        expected_execution_time: "1".to_owned(),
+        expected_deadline: "5".to_owned(),
     };
     cfgs.push((client3, scc3));
+
+    let client4 = Client::new();
+    let scc4 = CallConfigRequest {
+        wasm_name: "fib.wasm".to_owned(),
+        task_unique_name: "scc3".to_owned(),
+        export_func: "fib_r".to_owned(),
+        param_type: "i32".to_owned(),
+        params: vec!["35".to_string()],
+        results_length: "1".to_owned(),
+        expected_execution_time: "35".to_owned(),
+        expected_deadline: "50".to_owned(),
+    };
+    cfgs.push((client4, scc4));
 
     let mut tasks = Vec::new();
     for cfg in cfgs {
@@ -79,6 +92,7 @@ async fn main() {
     let _ = client.get_status_by_name("scc1").await;
     let _ = client.get_status_by_name("scc2").await;
     let _ = client.get_status_by_name("scc3").await;
+    let _ = client.get_status_by_name("scc4").await;
 }
 
 async fn req(client: Client, cfg: CallConfigRequest) {

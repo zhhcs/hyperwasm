@@ -131,7 +131,7 @@ impl Scheduler {
             cancelled_queue: Mutex::new(VecDeque::new()),
             co_status: Mutex::new(BTreeMap::new()),
             completed_status: Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(100).unwrap(),
+                std::num::NonZeroUsize::new(100000).unwrap(),
             )),
             curr_running_id: AtomicU64::new(0),
         })
@@ -220,6 +220,7 @@ impl Scheduler {
                 q.push(co);
                 return Ok(());
             }
+            panic!("realtime queue failed")
         } else {
             if let Ok(q) = self.global_queue.lock().as_mut() {
                 q.push_back(co);
@@ -300,12 +301,16 @@ impl Scheduler {
         None
     }
 
-    // pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
-    //     if let Ok(status) = self.completed_status.try_lock().as_mut() {
-    //         return Some(status);
-    //     }
-    //     None
-    // }
+    pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
+        if let Ok(status) = self.completed_status.try_lock().as_mut() {
+            let mut map = BTreeMap::new();
+            for stat in status.iter() {
+                map.insert(*stat.0, stat.1.clone());
+            }
+            return Some(map);
+        }
+        None
+    }
 
     pub fn update_completed_status(&self, co_id: u64, stat: SchedulerStatus) {
         if let Ok(status) = self.completed_status.lock().as_mut() {
@@ -320,6 +325,23 @@ impl Scheduler {
 
     pub fn get_curr_running_id(&self) -> u64 {
         self.curr_running_id.load(Ordering::SeqCst)
+    }
+
+    pub fn get_end_ddl(&self) -> Option<Instant> {
+        //找到co_status中任务的最大的绝对截至日期
+        if let Ok(status) = self.co_status.try_lock() {
+            let mut max_ddl = Instant::now();
+            for (_, stat) in status.iter() {
+                if let Some(ddl) = stat.absolute_deadline {
+                    if ddl > max_ddl {
+                        max_ddl = ddl;
+                    }
+                }
+            }
+            return Some(max_ddl);
+        } else {
+            return None;
+        }
     }
 }
 

@@ -30,13 +30,17 @@ async fn main() {
     let mut rng = rand::thread_rng();
 
     let mut cfgs = Vec::new();
+
     for i in 0..1000 {
+        let rand = vec![rng.gen_range(0..100); 500];
         let client = Client::new();
-        let (num, t1, t2) = (27, 1, 20);
-        // if i % 2 == 0 {
-        //     (20, 1, rng.gen_range(2..10))
+        let (num, t1, t2) = (27, 3, 20);
+        let (num2, t1_2, t2_2) = (30, 9, 100);
+
+        // if i % 9 == 0 {
+        //     (30, 5, 100)
         // } else {
-        //     (40, 2000, rng.gen_range(2100..20000))
+        //     (27, 1, 20)
         // };
         let call_config = CallConfigRequest {
             wasm_name: "fib.wasm".to_owned(),
@@ -49,7 +53,18 @@ async fn main() {
             expected_deadline: t2.to_string(),
             //expected_deadline: rng.gen_range(2100..20000).to_string(),
         };
-        cfgs.push((client, call_config));
+        let call_config2 = CallConfigRequest {
+            wasm_name: "fib.wasm".to_owned(),
+            task_unique_name: format!("fib_abcd{}", i),
+            export_func: "fib_r".to_owned(),
+            param_type: "i32".to_owned(),
+            params: vec![num2.to_string()],
+            results_length: "1".to_owned(),
+            expected_execution_time: t1_2.to_string(),
+            expected_deadline: t2_2.to_string(),
+            //expected_deadline: rng.gen_range(2100..20000).to_string(),
+        };
+        cfgs.push((client, call_config, call_config2, rand));
     }
     let client = Client::new();
     let config = RegisterConfig::new(
@@ -60,7 +75,7 @@ async fn main() {
 
     let mut tasks = Vec::new();
     for cfg in cfgs {
-        let task = tokio::spawn(req(cfg.0, cfg.1));
+        let task = tokio::spawn(req(cfg.0, cfg.1, cfg.2, cfg.3));
         tasks.push(task);
     }
 
@@ -74,9 +89,21 @@ async fn main() {
     let _ = client.get_latency().await;
 }
 
-async fn req(client: Client, mut cfg: CallConfigRequest) {
+async fn req(
+    client: Client,
+    mut cfg1: CallConfigRequest,
+    mut cfg2: CallConfigRequest,
+    rand: Vec<i32>,
+) {
     for i in 0..2000 {
-        cfg.task_unique_name.push_str(&format!("_{}", i));
-        let _ = client.call(&cfg).await;
+        cfg1.task_unique_name.push_str(&format!("_{}", i));
+        let _ = client.call(&cfg1).await;
+        // if rand[i % 500] > 49 {
+        //     cfg1.task_unique_name.push_str(&format!("_{}", i));
+        //     let _ = client.call(&cfg1).await;
+        // } else {
+        //     cfg2.task_unique_name.push_str(&format!("_{}", i));
+        //     let _ = client.call(&cfg2).await;
+        // }
     }
 }
