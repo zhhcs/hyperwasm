@@ -1,7 +1,7 @@
 use crate::{
     axum::{CallConfigRequest, TestRequest},
     result::FuncResult,
-    runtime::{AdmissionControl, Runtime},
+    runtime::{AdmissionControl, Runtime, SchedulabilityResult},
     task::SchedulerStatus,
 };
 use anyhow::Error;
@@ -328,8 +328,7 @@ fn instantiate(
     env: Environment,
     mut conf: FuncConfig,
     func_result: &Arc<FuncResult>,
-    ac: AdmissionControl,
-    status: Option<SchedulerStatus>,
+    schedulability_result: SchedulabilityResult,
 ) -> Result<u64, Error> {
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
@@ -356,7 +355,7 @@ fn instantiate(
                 Err(err)
             }
         };
-        let id = rt.micro_process(func, ac, status);
+        let id = rt.micro_process(func, schedulability_result);
         match id {
             Ok(id) => {
                 NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
@@ -416,11 +415,11 @@ pub fn call_func(
     //     AdmissionControl::SCHEDULABLE,
     //     res.1,
     // )
-    if res.0 == AdmissionControl::UNSCHEDULABLE {
+    if res.get_ac() == AdmissionControl::UNSCHEDULABLE {
         func_result.set_completed();
         Err(Error::msg("spawn failed, cause: UNSCHEDULABLE"))
     } else {
-        instantiate(rt, env, conf, func_result, res.0, res.1)
+        instantiate(rt, env, conf, func_result, res)
     }
 }
 

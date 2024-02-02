@@ -9,7 +9,7 @@ use rand::Rng;
 
 // cargo build --release --package hyper-scheduler --example client
 // sudo ./target/release/examples/client
-#[tokio::main(flavor = "multi_thread", worker_threads = 20)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing::Level::INFO)
@@ -31,7 +31,7 @@ async fn main() {
 
     let mut cfgs = Vec::new();
 
-    for i in 0..1000 {
+    for i in 0..100 {
         let rand = vec![rng.gen_range(0..100); 500];
         let client = Client::new();
         let (num, t1, t2) = (27, 3, 20);
@@ -95,7 +95,7 @@ async fn req(
     mut cfg2: CallConfigRequest,
     rand: Vec<i32>,
 ) {
-    for i in 0..2000 {
+    for i in 0..200 {
         cfg1.task_unique_name.push_str(&format!("_{}", i));
         let _ = client.call(&cfg1).await;
         // if rand[i % 500] > 49 {

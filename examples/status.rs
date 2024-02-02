@@ -14,7 +14,7 @@ fn main() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
-    let rt: Arc<Runtime> = Arc::new(Runtime::new());
+    let rt: Arc<Runtime> = Arc::new(Runtime::default());
     let mut queue = BinaryHeap::new();
     for i in 0..5 {
         let co = Coroutine::new(

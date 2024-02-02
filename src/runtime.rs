@@ -21,32 +21,47 @@ pub struct Runtime {
     threads: Vec<JoinHandle<()>>,
 }
 
+impl Default for Runtime {
+    fn default() -> Self {
+        let scheduler = Scheduler::new(1);
+        let threads = Scheduler::start(&scheduler);
+        Self { scheduler, threads }
+    }
+}
+
 impl Runtime {
-    pub fn new() -> Runtime {
-        let scheduler = Scheduler::new();
+    pub fn new(worker_threads: Option<u8>) -> Runtime {
+        let scheduler = Scheduler::new(worker_threads.unwrap_or_default());
         let threads = Scheduler::start(&scheduler);
         Runtime { scheduler, threads }
     }
 
+    /// 准入控制的结果
+    ///
+    /// @return
+    /// (AdmissionControl, worker_id, SchedulerStatus)
     pub fn admission_control_result(
         &self,
         expected_execution_time: Option<Duration>,
         relative_deadline: Option<Duration>,
-    ) -> (AdmissionControl, Option<SchedulerStatus>) {
+    ) -> SchedulabilityResult {
         if relative_deadline.is_none() || expected_execution_time.is_none() {
-            return (AdmissionControl::NOTREALTIME, None);
+            return SchedulabilityResult {
+                ac: AdmissionControl::NOTREALTIME,
+                worker_id: None,
+                costatus: None,
+            };
         }
         let mut co_stat = SchedulerStatus::new(expected_execution_time, relative_deadline);
         let id = crate::task::get_id();
         co_stat.init(id);
-        (self.is_schedulable(&co_stat), Some(co_stat))
+        self.is_schedulable(&co_stat)
     }
 
     pub fn micro_process<F, T>(
         &self,
         f: F,
-        ac: AdmissionControl,
-        status: Option<SchedulerStatus>,
+        schedulability_result: SchedulabilityResult,
     ) -> Result<u64, Error>
     where
         F: FnOnce() -> T,
@@ -56,14 +71,18 @@ impl Runtime {
         let func = Box::new(move || {
             let _ = panic::catch_unwind(AssertUnwindSafe(f));
         });
+        let ac = schedulability_result.get_ac();
+        let worker_id = schedulability_result.worker_id.unwrap_or_default();
+        let status = schedulability_result.costatus;
         match ac {
             AdmissionControl::NOTREALTIME => {
                 tracing::info!("NOT REAL TIME");
                 let co = Coroutine::new(func, StackSize::default(), false, None, None);
-                let stat = co.get_schedulestatus();
+                // let stat = co.get_schedulestatus();
                 let id = co.get_co_id();
-                if let Ok(()) = self.scheduler.push(co, false) {
-                    self.scheduler.update_status(id, stat);
+                // 这里的worker_id没用
+                if let Ok(()) = self.scheduler.push(co, false, worker_id) {
+                    // self.scheduler.update_status(id, stat, worker_id);
                     return Ok(id);
                 } else {
                     tracing::error!("spawn failed");
@@ -74,8 +93,8 @@ impl Runtime {
                 let co = Coroutine::from_status(func, status.unwrap());
                 let id = co.get_co_id();
                 let stat = co.get_schedulestatus();
-                self.scheduler.update_status(id, stat);
-                self.scheduler.set_slot(co);
+                self.scheduler.update_status(id, stat, worker_id);
+                self.scheduler.set_slots(worker_id, co);
 
                 let sigval = libc::sigval {
                     sival_ptr: 0 as *mut libc::c_void,
@@ -94,8 +113,8 @@ impl Runtime {
                 let co = Coroutine::from_status(func, status.unwrap());
                 let stat = co.get_schedulestatus();
                 let id = co.get_co_id();
-                if let Ok(()) = self.scheduler.push(co, true) {
-                    self.scheduler.update_status(id, stat);
+                if let Ok(()) = self.scheduler.push(co, true, worker_id) {
+                    self.scheduler.update_status(id, stat, worker_id);
                     return Ok(id);
                 } else {
                     tracing::error!("spawn failed");
@@ -108,94 +127,20 @@ impl Runtime {
         }
     }
 
-    // #[deprecated]
-    pub fn spawn<F, T>(
-        &self,
-        f: F,
-        expected_execution_time: Option<Duration>,
-        relative_deadline: Option<Duration>,
-    ) -> Result<u64, std::io::Error>
-    where
-        F: FnOnce() -> T,
-        F: Send + 'static,
-        T: Send + 'static,
-    {
-        let func = Box::new(move || {
-            let _ = panic::catch_unwind(AssertUnwindSafe(f));
-        });
-        let co = Coroutine::new(
-            func,
-            StackSize::default(),
-            false,
-            expected_execution_time,
-            relative_deadline,
-        );
-        let stat = co.get_schedulestatus();
-        let id = co.get_co_id();
-        if !co.is_realtime() {
-            // tracing::info!("case 0");
-            if let Ok(()) = self.scheduler.push(co, false) {
-                self.scheduler.update_status(id, stat);
-            } else {
-                tracing::error!("spawn failed");
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "spawn failed",
-                ));
-            };
-        } else {
-            match self.is_schedulable(&stat) {
-                AdmissionControl::PREEMPTIVE => {
-                    self.scheduler.set_slot(co);
-
-                    let sigval = libc::sigval {
-                        sival_ptr: 0 as *mut libc::c_void,
-                    };
-                    let ret = unsafe {
-                        libc::pthread_sigqueue(
-                            crate::scheduler::PTHREADTID,
-                            crate::scheduler::PREEMPTY as i32,
-                            sigval,
-                        )
-                    };
-                    // let now = Instant::now();
-                    // tracing::info!("sig {:?}", now);
-                    assert!(ret == 0);
-                }
-                AdmissionControl::SCHEDULABLE => {
-                    if let Ok(()) = self.scheduler.push(co, true) {
-                        self.scheduler.update_status(id, stat);
-                    } else {
-                        tracing::error!("spawn failed");
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "spawn failed, unexpected error",
-                        ));
-                    };
-                }
-                AdmissionControl::UNSCHEDULABLE => {
-                    // tracing::warn!("id = {} spawn failed, cause: UNSCHEDULABLE", co.get_co_id());
-                    self.scheduler.cancell(co);
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "spawn failed, cause: UNSCHEDULABLE",
-                    ));
-                }
-                AdmissionControl::NOTREALTIME => (),
-            };
-        }
-        Ok(id)
-    }
-
-    fn is_schedulable(&self, co_stat: &SchedulerStatus) -> AdmissionControl {
-        while let Some(mut status_map) = self.scheduler.get_status() {
+    fn is_schedulable(&self, co_stat: &SchedulerStatus) -> SchedulabilityResult {
+        let worker_id = (co_stat.get_co_id() % self.threads.len() as u64) as u8;
+        while let Some(mut status_map) = self.scheduler.get_status(worker_id) {
             //获取调度器的任务状态信息并进入循环，没有任务状态信息，循环将退出。
             if status_map.is_empty() {
                 //如果任务状态信息为空，表示当前没有其他任务在运行，因此可以直接调度新任务。
                 // tracing::info!("case 1");
-                return AdmissionControl::SCHEDULABLE;
+                return SchedulabilityResult {
+                    ac: AdmissionControl::SCHEDULABLE,
+                    worker_id: Some(worker_id),
+                    costatus: Some(co_stat.clone()),
+                };
             }
-            let curr: u64 = self.scheduler.get_curr_running_id(); //获取当前正在运行的任务的唯一标识符
+            let curr: u64 = self.scheduler.get_curr_running_id(worker_id); //获取当前正在运行的任务的唯一标识符
 
             let running = status_map.get(&curr); //获取当前运行的任务的状态信息
             if running.is_none() {
@@ -229,10 +174,14 @@ impl Runtime {
             } else {
                 //如果当前运行任务没有绝对截止日期，可以被抢占
                 // tracing::info!("case 2");
-                return AdmissionControl::PREEMPTIVE;
+                return SchedulabilityResult {
+                    ac: AdmissionControl::PREEMPTIVE,
+                    worker_id: Some(worker_id),
+                    costatus: Some(co_stat.clone()),
+                };
             }
             //如果𝑑_𝑛𝑒𝑤- 𝑑_𝑙𝑎𝑠𝑡≥ 𝐶_𝑛𝑒𝑤，直接准入
-            if let Some(end_ddl) = self.scheduler.get_end_ddl() {
+            if let Some(end_ddl) = self.scheduler.get_end_ddl(worker_id) {
                 if co_stat.expected_remaining_execution_time.unwrap()
                     <= co_stat.absolute_deadline.unwrap() - end_ddl
                 {
@@ -258,7 +207,11 @@ impl Runtime {
                     if let Ok(map) = AVA_TIME.lock().as_mut() {
                         map.insert(co_stat.get_co_id(), available_time);
                     }
-                    return AdmissionControl::SCHEDULABLE;
+                    return SchedulabilityResult {
+                        ac: AdmissionControl::SCHEDULABLE,
+                        worker_id: Some(worker_id),
+                        costatus: Some(co_stat.clone()),
+                    };
                 }
             }
 
@@ -273,23 +226,24 @@ impl Runtime {
 
             let s1 = stat_vec.peek().unwrap().to_owned(); //获取堆中的第一个元素，即具有最早截止日期的任务。
             let mut total_remaining: f64 = 0.0; //任务的总剩余执行时间
-                                                /*status_map.iter().for_each(|(_, s)| {
-                                                    if s.absolute_deadline < co_stat.absolute_deadline {
-                                                        total_remaining += s.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64;
-                                                    }
-                                                });
-                                                let available_time = (co_stat.absolute_deadline.unwrap() - now).as_micros() as i128 as f64 - total_remaining;  //计算任务可用时间
-                                                if available_time < co_stat.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64 {
-                                                    return AdmissionControll::UNSCHEDULABLE;
-                                                }
-                                                for (_, s) in status_map.iter() {
-                                                    if s.absolute_deadline > co_stat.absolute_deadline {    //验证后面的任务是否满足
-                                                        if (s.available_time.unwrap() - co_stat.expected_remaining_execution_time.unwrap()) < s.expected_remaining_execution_time.unwrap() {
-                                                            return AdmissionControll::UNSCHEDULABLE;
-                                                        }
-                                                    }
-                                                    return AdmissionControll::SCHEDULABLE;
-                                                }*/
+
+            /*status_map.iter().for_each(|(_, s)| {
+                if s.absolute_deadline < co_stat.absolute_deadline {
+                    total_remaining += s.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64;
+                }
+            });
+            let available_time = (co_stat.absolute_deadline.unwrap() - now).as_micros() as i128 as f64 - total_remaining;  //计算任务可用时间
+            if available_time < co_stat.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64 {
+                return AdmissionControll::UNSCHEDULABLE;
+            }
+            for (_, s) in status_map.iter() {
+                if s.absolute_deadline > co_stat.absolute_deadline {    //验证后面的任务是否满足
+                    if (s.available_time.unwrap() - co_stat.expected_remaining_execution_time.unwrap()) < s.expected_remaining_execution_time.unwrap() {
+                        return AdmissionControll::UNSCHEDULABLE;
+                    }
+                }
+                return AdmissionControll::SCHEDULABLE;
+            }*/
             let mut found_task = false; //标志是否在二叉堆里找到指定任务
             while let Some(s) = stat_vec.pop() {
                 if !found_task && s == co_stat {
@@ -322,7 +276,11 @@ impl Runtime {
                     .unwrap()
                     .as_micros() as i128 as f64
             {
-                return AdmissionControl::UNSCHEDULABLE;
+                return SchedulabilityResult {
+                    ac: AdmissionControl::UNSCHEDULABLE,
+                    worker_id: None,
+                    costatus: None,
+                };
             } else {
                 //co_stat.available_time = Some(std::time::Duration::from_micros(available_time as u64));
                 if let Ok(map) = AVA_TIME.lock().as_mut() {
@@ -345,7 +303,11 @@ impl Runtime {
                                     as f64
                             {
                                 *map = backup_ava_time;
-                                return AdmissionControl::UNSCHEDULABLE;
+                                return SchedulabilityResult {
+                                    ac: AdmissionControl::UNSCHEDULABLE,
+                                    worker_id: None,
+                                    costatus: None,
+                                };
                             } else {
                                 //改变后面任务的可用时间
                                 map.insert(
@@ -365,12 +327,20 @@ impl Runtime {
 
             if s1.eq(&co_stat) {
                 // tracing::info!("case 4");
-                return AdmissionControl::PREEMPTIVE;
+                return SchedulabilityResult {
+                    ac: AdmissionControl::PREEMPTIVE,
+                    worker_id: Some(worker_id),
+                    costatus: Some(co_stat.clone()),
+                };
             }
             break;
         }
         // tracing::info!("case 5");
-        AdmissionControl::SCHEDULABLE
+        return SchedulabilityResult {
+            ac: AdmissionControl::SCHEDULABLE,
+            worker_id: Some(worker_id),
+            costatus: Some(co_stat.clone()),
+        };
     }
 
     pub fn get_status_by_id(&self, id: u64) -> Option<SchedulerStatus> {
@@ -378,7 +348,7 @@ impl Runtime {
     }
 
     pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
-        self.scheduler.get_status()
+        self.scheduler.get_status(0)
     }
 
     // pub fn print_completed_status(&self) {
@@ -392,9 +362,9 @@ impl Runtime {
         self.scheduler.get_completed_status()
     }
 
-    pub fn drop_co(&self) {
-        self.scheduler.drop_co();
-    }
+    // pub fn drop_co(&self) {
+    //     self.scheduler.drop_co();
+    // }
 }
 
 impl Drop for Runtime {
@@ -405,10 +375,22 @@ impl Drop for Runtime {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum AdmissionControl {
     NOTREALTIME,
     PREEMPTIVE,
     SCHEDULABLE,
     UNSCHEDULABLE,
+}
+
+pub struct SchedulabilityResult {
+    ac: AdmissionControl,
+    worker_id: Option<u8>,
+    costatus: Option<SchedulerStatus>,
+}
+
+impl SchedulabilityResult {
+    pub fn get_ac(&self) -> AdmissionControl {
+        self.ac
+    }
 }

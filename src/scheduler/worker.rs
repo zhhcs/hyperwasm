@@ -23,6 +23,7 @@ pub fn get_worker() -> ptr::NonNull<Worker> {
 pub type ArrayQueue<T> = VecDeque<T>;
 
 pub struct Worker {
+    worker_id: u8,
     new_spawned: ArrayQueue<Box<Coroutine>>,
     local_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
     suspend_queue: ArrayQueue<ptr::NonNull<Coroutine>>,
@@ -39,7 +40,7 @@ unsafe impl Send for Worker {}
 unsafe impl Sync for Worker {}
 
 impl Worker {
-    pub fn new(scheduler: &Arc<Scheduler>, capacity: usize) -> Arc<Worker> {
+    pub fn new(scheduler: &Arc<Scheduler>, capacity: usize, worker_id: u8) -> Arc<Worker> {
         let new_spawned = ArrayQueue::with_capacity(capacity);
         let local_queue = ArrayQueue::with_capacity(capacity);
         let suspend_queue = ArrayQueue::with_capacity(capacity);
@@ -47,6 +48,7 @@ impl Worker {
         let realtime_status = BinaryHeap::with_capacity(capacity);
 
         Arc::new(Worker {
+            worker_id,
             new_spawned,
             local_queue,
             suspend_queue,
@@ -67,10 +69,10 @@ impl Worker {
     pub fn set_cgroup(&self, tid: Pid) {
         let cg_worker = crate::cgroupv2::Controllerv2::new(
             std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
-            String::from("worker"),
+            format!("worker{}", tid),
         );
         cg_worker.set_threaded();
-        cg_worker.set_cpuset(2, None);
+        cg_worker.set_cpuset(self.worker_id + 2, None);
         cg_worker.set_cgroup_threads(tid);
     }
 
@@ -89,7 +91,7 @@ impl Worker {
     }
 
     pub fn preemptive(&mut self) -> bool {
-        while let Some(co) = self.scheduler.get_slot() {
+        while let Some(co) = self.scheduler.get_slots(self.worker_id) {
             // tracing::info!("{} preempt", co.get_co_id());
             self.curr = Some(ptr::NonNull::from(Box::leak(Box::new(*co))));
             self.len += 1;
@@ -117,7 +119,7 @@ impl Worker {
     }
 
     pub fn get_task(&mut self) {
-        while let Some(co) = self.scheduler.pop_realtime() {
+        while let Some(co) = self.scheduler.pop_realtime(self.worker_id) {
             // tracing::info!("now getting task {:?}", std::time::Instant::now());
             self.add_realtime(co);
             self.len += 1;
@@ -172,7 +174,7 @@ impl Worker {
             } else {
                 self.suspend_queue.push_back(curr.into());
             }
-            curr.suspend(&self.scheduler);
+            curr.suspend(&self.scheduler, self.worker_id);
         }
     }
 
@@ -190,7 +192,7 @@ impl Worker {
         unsafe { get_timer().as_mut().reset_timer() };
 
         let c = unsafe { co.as_mut() };
-        if c.resume(&self.scheduler) {
+        if c.resume(&self.scheduler, self.worker_id) {
             return;
         }
         self.len -= 1;

@@ -326,14 +326,14 @@ impl Coroutine {
     // }
 
     /// Resumes coroutine.
-    pub fn resume(&mut self, sched: &Arc<Scheduler>) -> bool {
+    pub fn resume(&mut self, sched: &Arc<Scheduler>, worker_id: u8) -> bool {
         // tracing::info!("{}, start resume", self.get_co_id());
         let now = Instant::now();
         self.schedule_status.curr_start_time = Some(now);
         self.status = CoStatus::RUNNING;
         self.schedule_status.update_status(now, self.status);
-        sched.update_status(self.get_co_id(), self.get_schedulestatus());
-        sched.set_curr_running_id(self.get_co_id());
+        sched.update_status(self.get_co_id(), self.get_schedulestatus(), worker_id);
+        sched.set_curr_running_id(self.get_co_id(), worker_id);
 
         let _scope = Scope::enter(self);
 
@@ -349,14 +349,14 @@ impl Coroutine {
         }
     }
 
-    pub fn suspend(&mut self, sched: &Arc<Scheduler>) {
+    pub fn suspend(&mut self, sched: &Arc<Scheduler>, worker_id: u8) {
         // tracing::info!("{}, start suspend", self.get_co_id());
         let now = Instant::now();
         self.schedule_status.update_status(now, self.status);
         self.schedule_status.update_running_time(now);
         self.schedule_status.update_remaining();
         // let id = self.get_co_id();
-        sched.update_status(self.get_co_id(), self.get_schedulestatus());
+        sched.update_status(self.get_co_id(), self.get_schedulestatus(), worker_id);
         if let Some(context) = &mut self.context {
             // let now = Instant::now();
             // tracing::info!("suspend {}, {:?}", id, now);

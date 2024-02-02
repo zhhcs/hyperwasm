@@ -1,3 +1,8 @@
+# 多线程版
+multi_thread
+
+
+
 # hyper-sched
 仅在Ubuntu 22.04环境下运行，需要root权限
 ```

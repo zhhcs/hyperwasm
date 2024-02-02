@@ -41,7 +41,8 @@ pub fn get_start() -> Instant {
 }
 
 lazy_static::lazy_static! {
-    static ref RUNTIME: Arc<Runtime> = Arc::new(Runtime::new());
+    // static ref RUNTIME: Arc<Runtime> = Arc::new(Runtime::new(Some(2)));
+    static ref RUNTIME: Arc<Runtime> = Arc::new(Runtime::default());
     pub static ref LATENCY: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
@@ -79,7 +80,7 @@ impl Server {
                 String::from("tester"),
             );
             cg_tester.set_threaded();
-            cg_tester.set_cpuset(3, None);
+            cg_tester.set_cpuset(1, None);
             cg_tester.set_cgroup_threads(nix::unistd::gettid());
             loop {
                 // RUNTIME.as_ref().drop_co();

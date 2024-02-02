@@ -15,12 +15,12 @@ use nix::{
 };
 use std::{
     cell::Cell,
-    collections::{BTreeMap, BinaryHeap, VecDeque},
+    collections::{BTreeMap, BinaryHeap, HashMap, VecDeque},
     convert::TryFrom,
     ptr,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -110,30 +110,45 @@ impl LocalTimer {
 }
 
 pub struct Scheduler {
-    slot: Mutex<Option<Box<Coroutine>>>,
-    realtime_queue: Mutex<BinaryHeap<Box<Coroutine>>>,
+    workers: u8,
+    slots: HashMap<u8, RwLock<Option<Box<Coroutine>>>>,
+    realtime_queue: HashMap<u8, Mutex<BinaryHeap<Box<Coroutine>>>>,
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
-    cancelled_queue: Mutex<VecDeque<Box<Coroutine>>>,
-    co_status: Mutex<BTreeMap<u64, SchedulerStatus>>,
+    co_status: HashMap<u8, RwLock<BTreeMap<u64, SchedulerStatus>>>,
     completed_status: Mutex<lru::LruCache<u64, SchedulerStatus>>,
-    curr_running_id: AtomicU64,
+    curr_running_id: HashMap<u8, AtomicU64>,
+    pthread_ids: RwLock<HashMap<u8, nix::sys::pthread::Pthread>>,
 }
 
 unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
 impl Scheduler {
-    pub fn new() -> Arc<Scheduler> {
+    pub fn new(mut worker_threads: u8) -> Arc<Scheduler> {
+        if worker_threads == 0 {
+            worker_threads = 1;
+        }
+        let mut slots = HashMap::new();
+        let mut realtime_queue = HashMap::new();
+        let mut co_status = HashMap::new();
+        let mut curr_running_id = HashMap::new();
+        for i in 0..worker_threads {
+            slots.insert(i, RwLock::new(None));
+            realtime_queue.insert(i, Mutex::new(BinaryHeap::new()));
+            co_status.insert(i, RwLock::new(BTreeMap::new()));
+            curr_running_id.insert(i, AtomicU64::new(0));
+        }
         Arc::new(Scheduler {
-            slot: Mutex::new(None),
-            realtime_queue: Mutex::new(BinaryHeap::new()),
+            workers: worker_threads,
+            slots,
+            realtime_queue,
             global_queue: Mutex::new(VecDeque::new()),
-            cancelled_queue: Mutex::new(VecDeque::new()),
-            co_status: Mutex::new(BTreeMap::new()),
+            co_status,
             completed_status: Mutex::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(100000).unwrap(),
             )),
-            curr_running_id: AtomicU64::new(0),
+            curr_running_id,
+            pthread_ids: RwLock::new(HashMap::new()),
         })
     }
 
@@ -141,33 +156,36 @@ impl Scheduler {
         Self::create_cg();
         let scheduler = self.clone();
         init_start();
-        let t = thread::spawn(move || {
-            let pthreadtid = nix::sys::pthread::pthread_self();
-            unsafe { PTHREADTID = pthreadtid };
-            let sa = libc::sigaction {
-                sa_sigaction: signal_handler as libc::sighandler_t,
-                sa_mask: unsafe { std::mem::zeroed() },
-                sa_flags: libc::SA_SIGINFO | libc::SA_RESTART,
-                sa_restorer: None,
-            };
-            unsafe {
-                libc::sigaction(libc::SIGURG, &sa, std::ptr::null_mut());
-            }
-
-            let w = Worker::new(&scheduler, 16);
-            let tid = gettid();
-            w.set_cgroup(tid);
-            w.init();
-            let w = unsafe { get_worker().as_mut() };
-
-            // 设置线程定时器
-            let timer = LocalTimer::new(tid.into(), 10_000_000, SIG, 3);
-            timer.init();
-            w.run();
-        });
-
         let mut v = Vec::new();
-        v.push(t);
+        for i in 0..self.workers {
+            let scheduler = scheduler.clone();
+            let t = thread::spawn(move || {
+                let pthreadtid = nix::sys::pthread::pthread_self();
+
+                scheduler.set_pthread_ids(i, pthreadtid);
+                let sa = libc::sigaction {
+                    sa_sigaction: signal_handler as libc::sighandler_t,
+                    sa_mask: unsafe { std::mem::zeroed() },
+                    sa_flags: libc::SA_SIGINFO | libc::SA_RESTART,
+                    sa_restorer: None,
+                };
+                unsafe {
+                    libc::sigaction(libc::SIGURG, &sa, std::ptr::null_mut());
+                }
+
+                let w = Worker::new(&scheduler, 16, i);
+                let tid = gettid();
+                w.set_cgroup(tid);
+                w.init();
+                let w = unsafe { get_worker().as_mut() };
+
+                // 设置线程定时器
+                let timer = LocalTimer::new(tid.into(), 00_000_000, SIG, 3);
+                timer.init();
+                w.run();
+            });
+            v.push(t);
+        }
         v
     }
 
@@ -195,32 +213,47 @@ impl Scheduler {
         cg_main.set_cgroup_threads(nix::unistd::gettid());
     }
 
-    pub fn set_slot(&self, co: Box<Coroutine>) {
-        while let Ok(slot) = self.slot.try_lock().as_mut() {
-            if slot.is_none() {
-                let _ = slot.insert(co);
-                // tracing::info!("slot inserted {:?}", Instant::now());
-                break;
+    fn set_pthread_ids(&self, id: u8, pthread_id: nix::sys::pthread::Pthread) {
+        if let Ok(ids) = self.pthread_ids.try_write().as_mut() {
+            ids.insert(id, pthread_id);
+        }
+    }
+
+    pub fn set_slots(&self, worker_id: u8, co: Box<Coroutine>) {
+        if let Some(slot) = self.slots.get(&worker_id) {
+            // 如果有对应worker的slot
+            if let Ok(cobox) = slot.write().as_mut() {
+                if cobox.is_none() {
+                    let _ = cobox.insert(co);
+                }
             }
         }
     }
 
-    pub fn get_slot(&self) -> Option<Box<Coroutine>> {
-        if let Ok(slot) = self.slot.lock().as_mut() {
+    pub fn get_slots(&self, worker_id: u8) -> Option<Box<Coroutine>> {
+        if let Some(slot) = self.slots.get(&worker_id) {
             // tracing::info!("try_get_slot");
-            slot.take()
-        } else {
-            None
+            if let Ok(cobox) = slot.write().as_mut() {
+                return cobox.take();
+            }
         }
+        None
     }
 
-    pub fn push(&self, co: Box<Coroutine>, realtime: bool) -> Result<(), std::io::Error> {
+    pub fn push(
+        &self,
+        co: Box<Coroutine>,
+        realtime: bool,
+        worker_id: u8,
+    ) -> Result<(), std::io::Error> {
         if realtime {
-            if let Ok(q) = self.realtime_queue.lock().as_mut() {
-                q.push(co);
-                return Ok(());
+            if let Some(realtime_queue) = self.realtime_queue.get(&worker_id) {
+                if let Ok(q) = realtime_queue.lock().as_mut() {
+                    q.push(co);
+                    return Ok(());
+                }
             }
-            panic!("realtime queue failed")
+            // panic!("realtime queue failed")
         } else {
             if let Ok(q) = self.global_queue.lock().as_mut() {
                 q.push_back(co);
@@ -234,24 +267,13 @@ impl Scheduler {
         ))
     }
 
-    pub fn cancell(&self, co: Box<Coroutine>) {
-        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
-            q.push_back(co);
+    pub fn pop_realtime(&self, worker_id: u8) -> Option<Box<Coroutine>> {
+        if let Some(realtime_queue) = self.realtime_queue.get(&worker_id) {
+            if let Ok(q) = realtime_queue.try_lock().as_mut() {
+                return q.pop();
+            }
         }
-    }
-
-    pub fn drop_co(&self) {
-        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
-            q.iter_mut().for_each(|co| co.init());
-        }
-    }
-
-    pub fn pop_realtime(&self) -> Option<Box<Coroutine>> {
-        if let Ok(q) = self.realtime_queue.try_lock().as_mut() {
-            q.pop()
-        } else {
-            None
-        }
+        None
     }
 
     pub fn pop(&self) -> Option<Box<Coroutine>> {
@@ -270,31 +292,40 @@ impl Scheduler {
         }
     }
 
-    pub fn update_status(&self, co_id: u64, stat: SchedulerStatus) {
-        if let Ok(status) = self.co_status.lock().as_mut() {
-            status.insert(co_id, stat);
+    pub fn update_status(&self, co_id: u64, stat: SchedulerStatus, worker_id: u8) {
+        if let Some(co_status) = self.co_status.get(&worker_id) {
+            if let Ok(status) = co_status.write().as_mut() {
+                status.insert(co_id, stat);
+            }
         }
     }
 
-    fn delete_status(&self, co_id: u64) {
-        if let Ok(status) = self.co_status.lock().as_mut() {
-            status.remove(&co_id);
+    fn delete_status(&self, co_id: u64, worker_id: u8) {
+        if let Some(co_status) = self.co_status.get(&worker_id) {
+            if let Ok(status) = co_status.write().as_mut() {
+                status.remove(&co_id);
+            }
         }
     }
 
-    pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
-        if let Ok(status) = self.co_status.try_lock().as_mut() {
-            return Some(status.clone());
+    pub fn get_status(&self, worker_id: u8) -> Option<BTreeMap<u64, SchedulerStatus>> {
+        if let Some(co_status) = self.co_status.get(&worker_id) {
+            if let Ok(status) = co_status.read().as_mut() {
+                return Some(status.clone());
+            }
         }
         None
     }
 
     pub fn get_status_by_id(&self, id: u64) -> Option<SchedulerStatus> {
-        if let Ok(status) = self.co_status.try_lock() {
-            if status.contains_key(&id) {
-                return status.get(&id).cloned();
+        for (_, co_status) in self.co_status.iter() {
+            if let Ok(status) = co_status.try_read() {
+                if status.contains_key(&id) {
+                    return status.get(&id).cloned();
+                }
             }
         }
+
         if let Ok(mut status) = self.completed_status.try_lock() {
             return status.get(&id).cloned();
         }
@@ -316,40 +347,39 @@ impl Scheduler {
         if let Ok(status) = self.completed_status.lock().as_mut() {
             status.push(co_id, stat);
         }
-        self.delete_status(co_id);
+        self.delete_status(co_id, 0);
     }
 
-    pub fn set_curr_running_id(&self, co_id: u64) {
-        self.curr_running_id.store(co_id, Ordering::SeqCst);
+    pub fn set_curr_running_id(&self, co_id: u64, worker_id: u8) {
+        self.curr_running_id
+            .get(&worker_id)
+            .unwrap()
+            .store(co_id, Ordering::SeqCst);
     }
 
-    pub fn get_curr_running_id(&self) -> u64 {
-        self.curr_running_id.load(Ordering::SeqCst)
+    pub fn get_curr_running_id(&self, worker_id: u8) -> u64 {
+        self.curr_running_id
+            .get(&worker_id)
+            .unwrap()
+            .load(Ordering::SeqCst)
     }
 
-    pub fn get_end_ddl(&self) -> Option<Instant> {
+    pub fn get_end_ddl(&self, worker_id: u8) -> Option<Instant> {
         //找到co_status中任务的最大的绝对截至日期
-        if let Ok(status) = self.co_status.try_lock() {
-            let mut max_ddl = Instant::now();
-            for (_, stat) in status.iter() {
-                if let Some(ddl) = stat.absolute_deadline {
-                    if ddl > max_ddl {
-                        max_ddl = ddl;
+        if let Some(co_status) = self.co_status.get(&worker_id) {
+            if let Ok(status) = co_status.read().as_mut() {
+                let mut max_ddl = Instant::now();
+                for (_, stat) in status.iter() {
+                    if let Some(ddl) = stat.absolute_deadline {
+                        if ddl > max_ddl {
+                            max_ddl = ddl;
+                        }
                     }
                 }
+                return Some(max_ddl);
             }
-            return Some(max_ddl);
-        } else {
-            return None;
         }
-    }
-}
-
-impl Drop for Scheduler {
-    fn drop(&mut self) {
-        if let Ok(q) = self.cancelled_queue.try_lock().as_mut() {
-            q.iter_mut().for_each(|co| co.init());
-        }
+        None
     }
 }
 
