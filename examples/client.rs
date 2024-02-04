@@ -31,11 +31,11 @@ async fn main() {
 
     let mut cfgs = Vec::new();
 
-    for i in 0..100 {
+    for i in 0..500 {
         let rand = vec![rng.gen_range(0..100); 500];
         let client = Client::new();
-        let (num, t1, t2) = (27, 3, 20);
-        let (num2, t1_2, t2_2) = (30, 9, 100);
+        let (num, t1, t2) = (27, 2, 20);
+        let (num2, t1_2, t2_2) = (30, 5, 100);
 
         // if i % 9 == 0 {
         //     (30, 5, 100)
@@ -95,15 +95,15 @@ async fn req(
     mut cfg2: CallConfigRequest,
     rand: Vec<i32>,
 ) {
-    for i in 0..200 {
-        cfg1.task_unique_name.push_str(&format!("_{}", i));
-        let _ = client.call(&cfg1).await;
-        // if rand[i % 500] > 49 {
-        //     cfg1.task_unique_name.push_str(&format!("_{}", i));
-        //     let _ = client.call(&cfg1).await;
-        // } else {
-        //     cfg2.task_unique_name.push_str(&format!("_{}", i));
-        //     let _ = client.call(&cfg2).await;
-        // }
+    for i in 0..500 {
+        // cfg1.task_unique_name.push_str(&format!("_{}", i));
+        // let _ = client.call(&cfg1).await;
+        if rand[i % 500] > 49 {
+            cfg1.task_unique_name.push_str(&format!("_{}", i));
+            let _ = client.call(&cfg1).await;
+        } else {
+            cfg2.task_unique_name.push_str(&format!("_{}", i));
+            let _ = client.call(&cfg2).await;
+        }
     }
 }

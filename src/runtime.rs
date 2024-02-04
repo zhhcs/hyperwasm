@@ -99,16 +99,20 @@ impl Runtime {
                 let sigval = libc::sigval {
                     sival_ptr: 0 as *mut libc::c_void,
                 };
-                let ret = unsafe {
-                    libc::pthread_sigqueue(
-                        crate::scheduler::PTHREADTID,
-                        crate::scheduler::PREEMPTY as i32,
-                        sigval,
-                    )
-                };
-                assert!(ret == 0);
-                return Ok(id);
+                if let Some(pthread_id) = self.scheduler.get_pthread_id(worker_id) {
+                    let ret = unsafe {
+                        libc::pthread_sigqueue(
+                            pthread_id,
+                            crate::scheduler::PREEMPTY as i32,
+                            sigval,
+                        )
+                    };
+                    assert!(ret == 0);
+                    return Ok(id);
+                }
+                Err(Error::msg("spawn failed"))
             }
+
             AdmissionControl::SCHEDULABLE => {
                 let co = Coroutine::from_status(func, status.unwrap());
                 let stat = co.get_schedulestatus();
@@ -128,12 +132,12 @@ impl Runtime {
     }
 
     fn is_schedulable(&self, co_stat: &SchedulerStatus) -> SchedulabilityResult {
+        //TODO: 指定一个worker，怎么选？
         let worker_id = (co_stat.get_co_id() % self.threads.len() as u64) as u8;
         while let Some(mut status_map) = self.scheduler.get_status(worker_id) {
             //获取调度器的任务状态信息并进入循环，没有任务状态信息，循环将退出。
             if status_map.is_empty() {
                 //如果任务状态信息为空，表示当前没有其他任务在运行，因此可以直接调度新任务。
-                // tracing::info!("case 1");
                 return SchedulabilityResult {
                     ac: AdmissionControl::SCHEDULABLE,
                     worker_id: Some(worker_id),
@@ -145,11 +149,13 @@ impl Runtime {
             let running = status_map.get(&curr); //获取当前运行的任务的状态信息
             if running.is_none() {
                 //如果当前没有正在运行的任务，或者没有启动时间信息，则跳过循环并继续。
+                //没有获取到可能是任务刚开始
                 drop(status_map);
                 continue;
             }
             let start = running.unwrap().curr_start_time;
             if start.is_none() {
+                //同上,可能是任务刚开始
                 drop(status_map);
                 continue;
             }
@@ -167,46 +173,52 @@ impl Runtime {
                     //更新剩余执行时间
                     } else {
                         //如果剩余执行时间小于等于时间差，将剩余执行时间设置为零。
+                        //说明任务已经结束
                         curr_stat.expected_remaining_execution_time =
                             Some(std::time::Duration::from_millis(0));
                     }
                 });
             } else {
                 //如果当前运行任务没有绝对截止日期，可以被抢占
-                // tracing::info!("case 2");
                 return SchedulabilityResult {
                     ac: AdmissionControl::PREEMPTIVE,
                     worker_id: Some(worker_id),
                     costatus: Some(co_stat.clone()),
                 };
             }
-            //如果𝑑_𝑛𝑒𝑤- 𝑑_𝑙𝑎𝑠𝑡≥ 𝐶_𝑛𝑒𝑤，直接准入
+
+            // 以下开始是实时任务的准入控制
+            let mut stat_vec = BinaryHeap::new(); //创建一个二叉堆存储任务的状态信息
+            status_map.iter().for_each(|(_, s)| {
+                //迭代任务状态信息，将具有绝对截止日期的任务状态信息放入堆中。
+                if s.absolute_deadline.is_some() {
+                    stat_vec.push(s)
+                }
+            });
+            let mut total_remaining: f64 = 0.0; //任务的总剩余执行时间
+
+            //快速判断：如果𝑑_𝑛𝑒𝑤 - 𝑑_𝑙𝑎𝑠𝑡 ≥ 𝐶_𝑛𝑒𝑤，直接准入
             if let Some(end_ddl) = self.scheduler.get_end_ddl(worker_id) {
+                // TODO:get_end_ddl获取了最新的状态，是否可以用之前的status_map代替？
+
                 if co_stat.expected_remaining_execution_time.unwrap()
                     <= co_stat.absolute_deadline.unwrap() - end_ddl
                 {
-                    // tracing::info!("case 3");
-                    let mut stat_vec = BinaryHeap::new(); //创建一个二叉堆存储任务的状态信息
-                    status_map.iter_mut().for_each(|(_, s)| {
-                        //迭代任务状态信息，将具有绝对截止日期的任务状态信息放入堆中。
-                        if s.absolute_deadline.is_some() {
-                            stat_vec.push(s)
-                        }
-                    });
-                    let mut total_remaining: f64 = 0.0;
                     while let Some(s) = stat_vec.pop() {
-                        if s.absolute_deadline.is_some() {
-                            total_remaining +=
-                                s.expected_remaining_execution_time.unwrap().as_micros() as i128
-                                    as f64;
-                        }
+                        total_remaining +=
+                            s.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64;
                     }
                     let available_time = (co_stat.absolute_deadline.unwrap() - now).as_micros()
                         as i128 as f64
                         - total_remaining; //计算任务可用时间
-                    if let Ok(map) = AVA_TIME.lock().as_mut() {
-                        map.insert(co_stat.get_co_id(), available_time);
-                    }
+
+                    // TODO:确认一下多线程的ava_time是否正确
+                    self.scheduler
+                        .update_ava_time(worker_id, co_stat.get_co_id(), available_time);
+                    // if let Ok(map) = AVA_TIME.lock().as_mut() {
+                    //     map.insert(co_stat.get_co_id(), available_time);
+                    // }
+
                     return SchedulabilityResult {
                         ac: AdmissionControl::SCHEDULABLE,
                         worker_id: Some(worker_id),
@@ -215,36 +227,12 @@ impl Runtime {
                 }
             }
 
-            let mut stat_vec = BinaryHeap::new(); //创建一个二叉堆存储任务的状态信息
+            //如果𝑑_𝑛𝑒𝑤 - 𝑑_𝑙𝑎𝑠𝑡 < 𝐶_𝑛𝑒𝑤
             stat_vec.push(co_stat); //将所判断的任务的状态信息 co_stat 放入堆中
-            status_map.iter_mut().for_each(|(_, s)| {
-                //迭代任务状态信息，将具有绝对截止日期的任务状态信息放入堆中。
-                if s.absolute_deadline.is_some() {
-                    stat_vec.push(s)
-                }
-            });
-
-            let s1 = stat_vec.peek().unwrap().to_owned(); //获取堆中的第一个元素，即具有最早截止日期的任务。
-            let mut total_remaining: f64 = 0.0; //任务的总剩余执行时间
-
-            /*status_map.iter().for_each(|(_, s)| {
-                if s.absolute_deadline < co_stat.absolute_deadline {
-                    total_remaining += s.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64;
-                }
-            });
-            let available_time = (co_stat.absolute_deadline.unwrap() - now).as_micros() as i128 as f64 - total_remaining;  //计算任务可用时间
-            if available_time < co_stat.expected_remaining_execution_time.unwrap().as_micros() as i128 as f64 {
-                return AdmissionControll::UNSCHEDULABLE;
-            }
-            for (_, s) in status_map.iter() {
-                if s.absolute_deadline > co_stat.absolute_deadline {    //验证后面的任务是否满足
-                    if (s.available_time.unwrap() - co_stat.expected_remaining_execution_time.unwrap()) < s.expected_remaining_execution_time.unwrap() {
-                        return AdmissionControll::UNSCHEDULABLE;
-                    }
-                }
-                return AdmissionControll::SCHEDULABLE;
-            }*/
+            let s1 = stat_vec.peek().unwrap().to_owned(); //查看堆中的第一个元素，即具有最早截止日期的任务。
             let mut found_task = false; //标志是否在二叉堆里找到指定任务
+
+            // pop更高优先级的任务
             while let Some(s) = stat_vec.pop() {
                 if !found_task && s == co_stat {
                     found_task = true;
@@ -258,15 +246,9 @@ impl Runtime {
                 if found_task {
                     break;
                 }
-                /*let deadline =
-                    (s.absolute_deadline.unwrap() - start).as_micros() as i128 as f64;
-                let util = total_remaining / deadline;
-                // tracing::info!("tr: {},ddl: {}", total_remaining, deadline);
-                if util > 1.0 {
-                    // tracing::info!("case 3");
-                    return AdmissionControll::UNSCHEDULABLE;
-                }*/
             }
+
+            // d_new - t - RC >= C_new
             let available_time = (co_stat.absolute_deadline.unwrap() - now).as_micros() as i128
                 as f64
                 - total_remaining; //计算任务可用时间
@@ -282,19 +264,25 @@ impl Runtime {
                     costatus: None,
                 };
             } else {
-                //co_stat.available_time = Some(std::time::Duration::from_micros(available_time as u64));
-                if let Ok(map) = AVA_TIME.lock().as_mut() {
-                    map.insert(co_stat.get_co_id(), available_time);
-                }
+                // TODO:这里需要更新AVA_TIME吗？
+                // self.scheduler
+                //     .update_ava_time(worker_id, co_stat.get_co_id(), available_time);
+                // if let Ok(map) = AVA_TIME.lock().as_mut() {
+                //     map.insert(co_stat.get_co_id(), available_time);
+                // }
             }
-            stat_vec.pop(); //弹出co_stat
-            while let Some(s) = stat_vec.pop() {
-                //验证后面的任务是否满足
-                if s.absolute_deadline > co_stat.absolute_deadline {
-                    if let Ok(mut map) = AVA_TIME.lock() {
-                        //先备份 AVA_TIME 的状态
-                        let backup_ava_time = map.clone();
-                        let time = map.get(&s.get_co_id()).cloned();
+
+            // TODO:确认是否已经pop了？
+            // stat_vec.pop(); //弹出co_stat
+
+            // 继续验证低优先级任务
+            if let Some(mut map) = self.scheduler.get_ava_time(worker_id) {
+                //先复制AVA_TIME的状态
+                while let Some(s) = stat_vec.pop() {
+                    //验证后面的任务是否满足
+                    // time_i - C_new >= C_i
+                    if s.absolute_deadline > co_stat.absolute_deadline {
+                        let time = map.get(&s.get_co_id());
                         if let Some(time) = time {
                             if (time
                                 - (co_stat.expected_remaining_execution_time.unwrap()).as_micros()
@@ -302,7 +290,7 @@ impl Runtime {
                                 < (s.expected_remaining_execution_time.unwrap()).as_micros() as i128
                                     as f64
                             {
-                                *map = backup_ava_time;
+                                // 不可调度，无需改变AVA_TIME的状态
                                 return SchedulabilityResult {
                                     ac: AdmissionControl::UNSCHEDULABLE,
                                     worker_id: None,
@@ -322,8 +310,46 @@ impl Runtime {
                         }
                     }
                 }
+                // 循环结束更新整个AVA_TIME的状态
+                self.scheduler.update_ava_time_map(worker_id, map);
             }
-            //return AdmissionControll::SCHEDULABLE;   //后面所有任务验证完再返回可调度
+
+            // while let Some(s) = stat_vec.pop() {
+            //     //验证后面的任务是否满足
+            //     if s.absolute_deadline > co_stat.absolute_deadline {
+            //         if let Ok(mut map) = AVA_TIME.lock() {
+            //             //先备份 AVA_TIME 的状态
+            //             // TODO: 在循环中备份状态是否有问题？
+            //             let backup_ava_time = map.clone();
+            //             let time = map.get(&s.get_co_id()).cloned();
+            //             if let Some(time) = time {
+            //                 if (time
+            //                     - (co_stat.expected_remaining_execution_time.unwrap()).as_micros()
+            //                         as i128 as f64)
+            //                     < (s.expected_remaining_execution_time.unwrap()).as_micros() as i128
+            //                         as f64
+            //                 {
+            //                     *map = backup_ava_time;
+            //                     return SchedulabilityResult {
+            //                         ac: AdmissionControl::UNSCHEDULABLE,
+            //                         worker_id: None,
+            //                         costatus: None,
+            //                     };
+            //                 } else {
+            //                     //改变后面任务的可用时间
+            //                     map.insert(
+            //                         s.get_co_id(),
+            //                         time - co_stat
+            //                             .expected_remaining_execution_time
+            //                             .unwrap()
+            //                             .as_micros()
+            //                             as f64,
+            //                     );
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
 
             if s1.eq(&co_stat) {
                 // tracing::info!("case 4");
@@ -335,6 +361,8 @@ impl Runtime {
             }
             break;
         }
+
+        //后面所有任务验证完再返回可调度
         // tracing::info!("case 5");
         return SchedulabilityResult {
             ac: AdmissionControl::SCHEDULABLE,
@@ -361,10 +389,6 @@ impl Runtime {
     pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
         self.scheduler.get_completed_status()
     }
-
-    // pub fn drop_co(&self) {
-    //     self.scheduler.drop_co();
-    // }
 }
 
 impl Drop for Runtime {

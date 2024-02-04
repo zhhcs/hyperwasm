@@ -1,7 +1,9 @@
-use crate::{axum::get_port, runwasm::RegisterConfig};
-
 use super::{CallConfigRequest, TestRequest};
-
+use crate::{axum::get_port, runwasm::RegisterConfig};
+/**
+ * Client
+ * 一些客户端的接口
+ */
 pub struct Client {
     client: reqwest::Client,
 }

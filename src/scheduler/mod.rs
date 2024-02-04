@@ -29,7 +29,6 @@ use std::{
 pub mod worker;
 pub const PREEMPTY: Signal = Signal::SIGURG;
 pub const SIG: Signal = Signal::SIGALRM;
-pub static mut PTHREADTID: nix::sys::pthread::Pthread = 0;
 
 thread_local! {
     static TIMER: Cell<Option<ptr::NonNull<LocalTimer>>> = Cell::new(None);
@@ -111,6 +110,7 @@ impl LocalTimer {
 
 pub struct Scheduler {
     workers: u8,
+    ava_time: HashMap<u8, RwLock<HashMap<u64, f64>>>,
     slots: HashMap<u8, RwLock<Option<Box<Coroutine>>>>,
     realtime_queue: HashMap<u8, Mutex<BinaryHeap<Box<Coroutine>>>>,
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
@@ -128,11 +128,13 @@ impl Scheduler {
         if worker_threads == 0 {
             worker_threads = 1;
         }
+        let mut ava_time = HashMap::new();
         let mut slots = HashMap::new();
         let mut realtime_queue = HashMap::new();
         let mut co_status = HashMap::new();
         let mut curr_running_id = HashMap::new();
         for i in 0..worker_threads {
+            ava_time.insert(i, RwLock::new(HashMap::new()));
             slots.insert(i, RwLock::new(None));
             realtime_queue.insert(i, Mutex::new(BinaryHeap::new()));
             co_status.insert(i, RwLock::new(BTreeMap::new()));
@@ -140,6 +142,7 @@ impl Scheduler {
         }
         Arc::new(Scheduler {
             workers: worker_threads,
+            ava_time,
             slots,
             realtime_queue,
             global_queue: Mutex::new(VecDeque::new()),
@@ -213,9 +216,42 @@ impl Scheduler {
         cg_main.set_cgroup_threads(nix::unistd::gettid());
     }
 
-    fn set_pthread_ids(&self, id: u8, pthread_id: nix::sys::pthread::Pthread) {
-        if let Ok(ids) = self.pthread_ids.try_write().as_mut() {
-            ids.insert(id, pthread_id);
+    fn set_pthread_ids(&self, worker_id: u8, pthread_id: nix::sys::pthread::Pthread) {
+        if let Ok(ids) = self.pthread_ids.write().as_mut() {
+            ids.insert(worker_id, pthread_id);
+        }
+    }
+
+    pub fn get_pthread_id(&self, worker_id: u8) -> Option<nix::sys::pthread::Pthread> {
+        if let Ok(ids) = self.pthread_ids.read() {
+            ids.get(&worker_id).copied()
+        } else {
+            None
+        }
+    }
+
+    pub fn update_ava_time(&self, worker_id: u8, co_id: u64, available_time: f64) {
+        if let Some(ava_time) = self.ava_time.get(&worker_id) {
+            if let Ok(ava_time_map) = ava_time.write().as_mut() {
+                ava_time_map.insert(co_id, available_time);
+            }
+        }
+    }
+
+    pub fn get_ava_time(&self, worker_id: u8) -> Option<HashMap<u64, f64>> {
+        if let Some(ava_time) = self.ava_time.get(&worker_id) {
+            if let Ok(ava_time_map) = ava_time.read().as_deref() {
+                return Some(ava_time_map.clone());
+            }
+        }
+        None
+    }
+
+    pub fn update_ava_time_map(&self, worker_id: u8, ava_time_map_new: HashMap<u64, f64>) {
+        if let Some(ava_time) = self.ava_time.get(&worker_id) {
+            if let Ok(mut ava_time_map) = ava_time.write() {
+                *ava_time_map = ava_time_map_new;
+            }
         }
     }
 
@@ -253,7 +289,7 @@ impl Scheduler {
                     return Ok(());
                 }
             }
-            // panic!("realtime queue failed")
+            panic!("realtime queue failed")
         } else {
             if let Ok(q) = self.global_queue.lock().as_mut() {
                 q.push_back(co);
@@ -364,6 +400,7 @@ impl Scheduler {
             .load(Ordering::SeqCst)
     }
 
+    /// 找到worker中任务的最大的绝对截至日期
     pub fn get_end_ddl(&self, worker_id: u8) -> Option<Instant> {
         //找到co_status中任务的最大的绝对截至日期
         if let Some(co_status) = self.co_status.get(&worker_id) {
