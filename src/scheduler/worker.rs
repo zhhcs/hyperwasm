@@ -151,7 +151,7 @@ impl Worker {
                     //     std::time::Instant::now(),
                     //     id
                     // );
-                    self.run_co(co.into());
+                    self.run_co(co.into(), self.worker_id);
                 } else {
                     if self.len < self.capacity / 2 {
                         self.get_task();
@@ -187,7 +187,7 @@ impl Worker {
         tracing::info!("spawning local coroutine");
     }
 
-    fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>) {
+    fn run_co(&mut self, mut co: ptr::NonNull<Coroutine>, worker_id: u8) {
         // tracing::info!("running coroutine");
         unsafe { get_timer().as_mut().reset_timer() };
 
@@ -197,7 +197,7 @@ impl Worker {
         }
         self.len -= 1;
         self.scheduler
-            .update_completed_status(c.get_co_id(), c.get_schedulestatus());
+            .update_completed_status(c.get_co_id(), c.get_schedulestatus(), worker_id);
         Self::drop_coroutine(co);
     }
 

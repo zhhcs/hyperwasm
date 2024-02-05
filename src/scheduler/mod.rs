@@ -110,7 +110,7 @@ impl LocalTimer {
 
 pub struct Scheduler {
     workers: u8,
-    ava_time: HashMap<u8, RwLock<HashMap<u64, f64>>>,
+    ava_time: HashMap<u8, RwLock<HashMap<u64, f64>>>, // 任务结束后及时删除
     slots: HashMap<u8, RwLock<Option<Box<Coroutine>>>>,
     realtime_queue: HashMap<u8, Mutex<BinaryHeap<Box<Coroutine>>>>,
     global_queue: Mutex<VecDeque<Box<Coroutine>>>,
@@ -234,6 +234,14 @@ impl Scheduler {
         if let Some(ava_time) = self.ava_time.get(&worker_id) {
             if let Ok(ava_time_map) = ava_time.write().as_mut() {
                 ava_time_map.insert(co_id, available_time);
+            }
+        }
+    }
+
+    pub fn delete_ava_time(&self, worker_id: u8, co_id: u64) {
+        if let Some(ava_time) = self.ava_time.get(&worker_id) {
+            if let Ok(ava_time_map) = ava_time.write().as_mut() {
+                ava_time_map.remove(&co_id);
             }
         }
     }
@@ -379,11 +387,12 @@ impl Scheduler {
         None
     }
 
-    pub fn update_completed_status(&self, co_id: u64, stat: SchedulerStatus) {
+    pub fn update_completed_status(&self, co_id: u64, stat: SchedulerStatus, worker_id: u8) {
         if let Ok(status) = self.completed_status.lock().as_mut() {
             status.push(co_id, stat);
         }
-        self.delete_status(co_id, 0);
+        self.delete_status(co_id, worker_id);
+        self.delete_ava_time(worker_id, co_id);
     }
 
     pub fn set_curr_running_id(&self, co_id: u64, worker_id: u8) {

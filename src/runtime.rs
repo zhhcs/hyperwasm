@@ -376,7 +376,13 @@ impl Runtime {
     }
 
     pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
-        self.scheduler.get_status(0)
+        let mut status = BTreeMap::new();
+        for id in 0..self.threads.len() {
+            if let Some(mut map) = self.scheduler.get_status(id as u8) {
+                status.append(&mut map);
+            }
+        }
+        Some(status)
     }
 
     // pub fn print_completed_status(&self) {
