@@ -13,7 +13,7 @@ struct StatusQuery {
     uname: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CallConfigRequest {
     pub wasm_name: String,               //指定的wasm文件名
     pub task_unique_name: String,        //实例名称,必须唯一

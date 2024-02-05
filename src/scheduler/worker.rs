@@ -9,7 +9,6 @@ use std::{
     collections::{BinaryHeap, HashMap, VecDeque},
     ptr,
     sync::Arc,
-    // time::Instant,
 };
 
 thread_local! {

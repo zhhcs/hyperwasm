@@ -3,6 +3,7 @@ use crate::{axum::get_port, runwasm::RegisterConfig};
 /**
  * Client
  * 一些客户端的接口
+ * 与Server中的几乎对应
  */
 pub struct Client {
     client: reqwest::Client,

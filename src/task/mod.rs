@@ -1,11 +1,10 @@
 mod context;
 mod page_size;
 pub mod stack;
-use crate::axum::server::LATENCY;
-use crate::scheduler::Scheduler;
-
 use self::context::{Context, Entry};
 use self::stack::StackSize;
+use crate::axum::server::LATENCY;
+use crate::scheduler::Scheduler;
 use std::cell::{Cell, UnsafeCell};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -317,8 +316,11 @@ impl Coroutine {
     }
 
     fn run(&mut self) {
-        let f = self.f.take().expect("no entry function");
-        f();
+        if let Some(f) = self.f.take() {
+            f();
+        } else {
+            panic!("Failed to execute function");
+        }
     }
 
     // pub fn set_panic(&mut self, msg: &'static str) {

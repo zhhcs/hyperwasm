@@ -78,6 +78,7 @@ pub struct Tester {
     pub result: Arc<FuncResult>,
 }
 
+/// wasm环境配置
 #[derive(Clone)]
 pub struct Environment {
     wasm_name: String,
@@ -168,6 +169,7 @@ impl Environment {
     }
 }
 
+/// 函数配置
 #[derive(Clone, Debug)]
 pub struct FuncConfig {
     task_unique_name: String,   //实例名称,必须唯一
@@ -249,6 +251,9 @@ impl FuncConfig {
     }
 }
 
+/**
+ * 参数解析，或许有更好的写法
+ */
 fn cvt_params(param_type: String, params: Vec<String>) -> Result<Vec<wasmtime::Val>, Error> {
     let mut res = Vec::new();
     let mut ok = true;
@@ -298,6 +303,9 @@ fn cvt_params(param_type: String, params: Vec<String>) -> Result<Vec<wasmtime::V
     }
 }
 
+/**
+ * 测试线程用的
+ */
 pub fn call_func_sync(env: Environment) -> Result<Duration, Error> {
     let start = std::time::Instant::now();
     let mut conf = env.get_func_config().unwrap();
@@ -323,6 +331,9 @@ pub fn call_func_sync(env: Environment) -> Result<Duration, Error> {
     }
 }
 
+/**
+ * wasm实例化
+ */
 fn instantiate(
     rt: &Runtime,
     env: Environment,
@@ -337,13 +348,13 @@ fn instantiate(
     let mut store = Store::new(&env.engine, wasi);
     let instance = env.linker.instantiate(&mut store, &env.module)?;
 
-    // let task_unique_name = conf.task_unique_name.clone();
     let func_result_1 = func_result.clone();
 
+    // 获取导出函数
     if let Some(caller) = instance.get_func(&mut store, &conf.export_func) {
+        // 函数调用
         let func = move || match caller.call(&mut store, &conf.params, &mut conf.results) {
             Ok(_) => {
-                // tracing::info!("{}: results = {:?}", task_unique_name, conf.results);
                 func_result_1.set_result(&format!("{:?}", conf.results));
                 func_result_1.set_completed();
                 Ok(conf.results)
@@ -355,9 +366,11 @@ fn instantiate(
                 Err(err)
             }
         };
+        // 打包成microprocess
         let id = rt.micro_process(func, schedulability_result);
         match id {
             Ok(id) => {
+                // microprocess成功生成,名字唯一
                 NAME_ID.with(|map| map.borrow_mut().insert(conf.task_unique_name.clone(), id));
                 return Ok(id);
             }
@@ -368,10 +381,14 @@ fn instantiate(
             }
         }
     } else {
+        // 导出函数错误
         return Err(wasmtime::Error::msg("Invalid_export_func").context("Invalid_export_func"));
     }
 }
 
+/**
+ * WASM函数调用
+ */
 pub fn call_func(
     rt: &Runtime,
     env: Environment,
@@ -400,6 +417,7 @@ pub fn call_func(
     // 似乎有什么东西导致超时了
     // 暂时不知道怎么搞
     // 可以把预期执行时长写久一点
+    // 2024/02/05 无法复现
 
     let expected_execution_time = Some(std::time::Duration::from_millis(
         conf.expected_execution_time,
@@ -407,22 +425,22 @@ pub fn call_func(
     let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
 
     let res = rt.admission_control_result(expected_execution_time, relative_deadline);
-    // instantiate(
-    //     rt,
-    //     env,
-    //     conf,
-    //     func_result,
-    //     AdmissionControl::SCHEDULABLE,
-    //     res.1,
-    // )
+
     if res.get_ac() == AdmissionControl::UNSCHEDULABLE {
+        // 不可调度
+        let msg = "spawn failed, cause: UNSCHEDULABLE";
+        func_result.set_result(msg);
         func_result.set_completed();
-        Err(Error::msg("spawn failed, cause: UNSCHEDULABLE"))
+        Err(Error::msg(msg))
     } else {
+        // 实例化
         instantiate(rt, env, conf, func_result, res)
     }
 }
 
+/**
+ * 通过任务名字获取状态
+ */
 pub fn get_status_by_name(rt: &Runtime, unique_name: &str) -> Option<SchedulerStatus> {
     if let Some(id) = NAME_ID.with(|map| map.borrow().get(unique_name).cloned()) {
         if let Some(mut status) = rt.get_status_by_id(id) {

@@ -1,10 +1,9 @@
-use anyhow::Error;
-
 use crate::{
     scheduler::Scheduler,
     task::{Coroutine, SchedulerStatus},
     StackSize,
 };
+use anyhow::Error;
 use std::{
     collections::{BTreeMap, BinaryHeap, HashMap},
     panic::{self, AssertUnwindSafe},
@@ -16,12 +15,16 @@ lazy_static::lazy_static! {
     static ref AVA_TIME: Arc<Mutex<HashMap<u64, f64>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
+/// Runtime就是Runtime
 pub struct Runtime {
     scheduler: Arc<Scheduler>,
     threads: Vec<JoinHandle<()>>,
 }
 
 impl Default for Runtime {
+    /**
+     * 默认单线程
+     */
     fn default() -> Self {
         let scheduler = Scheduler::new(1);
         let threads = Scheduler::start(&scheduler);
@@ -30,21 +33,24 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    /**
+     * 需要指定线程数量
+     */
     pub fn new(worker_threads: Option<u8>) -> Runtime {
         let scheduler = Scheduler::new(worker_threads.unwrap_or_default());
         let threads = Scheduler::start(&scheduler);
         Runtime { scheduler, threads }
     }
 
-    /// 准入控制的结果
-    ///
-    /// @return
-    /// (AdmissionControl, worker_id, SchedulerStatus)
+    /**
+     * 准入控制的结果
+     */
     pub fn admission_control_result(
         &self,
         expected_execution_time: Option<Duration>,
         relative_deadline: Option<Duration>,
     ) -> SchedulabilityResult {
+        // 如果不是实时任务那就随便调度吧
         if relative_deadline.is_none() || expected_execution_time.is_none() {
             return SchedulabilityResult {
                 ac: AdmissionControl::NOTREALTIME,
@@ -52,12 +58,17 @@ impl Runtime {
                 costatus: None,
             };
         }
+        // 新建这个任务的状态并初始化id
         let mut co_stat = SchedulerStatus::new(expected_execution_time, relative_deadline);
         let id = crate::task::get_id();
         co_stat.init(id);
+        // 准入控制
         self.is_schedulable(&co_stat)
     }
 
+    /**
+     * microprocess的实例化
+     */
     pub fn micro_process<F, T>(
         &self,
         f: F,
@@ -68,21 +79,24 @@ impl Runtime {
         F: Send + 'static,
         T: Send + 'static,
     {
+        // 捕获panic
         let func = Box::new(move || {
             let _ = panic::catch_unwind(AssertUnwindSafe(f));
         });
+        // 获取准入控制结果
         let ac = schedulability_result.get_ac();
+        // 获取调度的目标线程
         let worker_id = schedulability_result.worker_id.unwrap_or_default();
+        // 这个状态用于实例化
         let status = schedulability_result.costatus;
         match ac {
             AdmissionControl::NOTREALTIME => {
                 tracing::info!("NOT REAL TIME");
                 let co = Coroutine::new(func, StackSize::default(), false, None, None);
-                // let stat = co.get_schedulestatus();
                 let id = co.get_co_id();
                 // 这里的worker_id没用
                 if let Ok(()) = self.scheduler.push(co, false, worker_id) {
-                    // self.scheduler.update_status(id, stat, worker_id);
+                    // 直接丢到全局队列
                     return Ok(id);
                 } else {
                     tracing::error!("spawn failed");
@@ -93,9 +107,12 @@ impl Runtime {
                 let co = Coroutine::from_status(func, status.unwrap());
                 let id = co.get_co_id();
                 let stat = co.get_schedulestatus();
+                // 先更新状态
                 self.scheduler.update_status(id, stat, worker_id);
+                // 放到对应线程的slot
                 self.scheduler.set_slots(worker_id, co);
 
+                // 发信号通知抢占
                 let sigval = libc::sigval {
                     sival_ptr: 0 as *mut libc::c_void,
                 };
@@ -117,6 +134,7 @@ impl Runtime {
                 let co = Coroutine::from_status(func, status.unwrap());
                 let stat = co.get_schedulestatus();
                 let id = co.get_co_id();
+                // 放到目标线程的实时队列排队
                 if let Ok(()) = self.scheduler.push(co, true, worker_id) {
                     self.scheduler.update_status(id, stat, worker_id);
                     return Ok(id);
@@ -126,18 +144,31 @@ impl Runtime {
                 };
             }
             _ => {
+                // 这个case永远不会到达
                 return Err(Error::msg("spawn failed, cause: UNSCHEDULABLE"));
             }
         }
     }
 
+    /**
+     * 准入控制
+     */
     fn is_schedulable(&self, co_stat: &SchedulerStatus) -> SchedulabilityResult {
-        //TODO: 指定一个worker，怎么选？
+        //TODO: 指定一个worker，怎么选？或者可以遍历所有的线程
+        // 这里直接随机指定一个
         let worker_id = (co_stat.get_co_id() % self.threads.len() as u64) as u8;
         while let Some(mut status_map) = self.scheduler.get_status(worker_id) {
             //获取调度器的任务状态信息并进入循环，没有任务状态信息，循环将退出。
             if status_map.is_empty() {
                 //如果任务状态信息为空，表示当前没有其他任务在运行，因此可以直接调度新任务。
+                //计算并更新可用时间
+                let available_time = (co_stat.absolute_deadline.unwrap()
+                    - Instant::now()
+                    - co_stat.expected_remaining_execution_time.unwrap())
+                .as_micros() as i128 as f64;
+                self.scheduler
+                    .update_ava_time(worker_id, co_stat.get_co_id(), available_time);
+
                 return SchedulabilityResult {
                     ac: AdmissionControl::SCHEDULABLE,
                     worker_id: Some(worker_id),
@@ -162,7 +193,7 @@ impl Runtime {
             let start = start.unwrap(); //当前运行任务启动时间
             let now = Instant::now(); //当前时间
             if status_map.get(&curr).unwrap().absolute_deadline.is_some() {
-                //如果当前运行的任务有绝对截止日期
+                //如果当前运行的任务有绝对截止日期，说明它是实时任务
                 status_map.entry(curr).and_modify(|curr_stat| {
                     let mut eret = curr_stat.expected_remaining_execution_time.unwrap(); //获取剩余执行时间
                     let time_diff = now - start;
@@ -180,6 +211,14 @@ impl Runtime {
                 });
             } else {
                 //如果当前运行任务没有绝对截止日期，可以被抢占
+                // 抢占前更新可用时间
+                let available_time = (co_stat.absolute_deadline.unwrap()
+                    - now
+                    - co_stat.expected_remaining_execution_time.unwrap())
+                .as_micros() as i128 as f64;
+                self.scheduler
+                    .update_ava_time(worker_id, co_stat.get_co_id(), available_time);
+
                 return SchedulabilityResult {
                     ac: AdmissionControl::PREEMPTIVE,
                     worker_id: Some(worker_id),
@@ -264,7 +303,7 @@ impl Runtime {
                     costatus: None,
                 };
             } else {
-                // TODO:这里需要更新AVA_TIME吗？
+                // TODO:这里需要更新AVA_TIME吗？先注释了
                 // self.scheduler
                 //     .update_ava_time(worker_id, co_stat.get_co_id(), available_time);
                 // if let Ok(map) = AVA_TIME.lock().as_mut() {
@@ -272,7 +311,7 @@ impl Runtime {
                 // }
             }
 
-            // TODO:确认是否已经pop了？
+            // TODO:确认是否已经pop了？先注释了
             // stat_vec.pop(); //弹出co_stat
 
             // 继续验证低优先级任务
@@ -351,8 +390,8 @@ impl Runtime {
             //     }
             // }
 
+            // 如果第一个任务恰好是这个任务，即最早截止时间
             if s1.eq(&co_stat) {
-                // tracing::info!("case 4");
                 return SchedulabilityResult {
                     ac: AdmissionControl::PREEMPTIVE,
                     worker_id: Some(worker_id),
@@ -363,7 +402,6 @@ impl Runtime {
         }
 
         //后面所有任务验证完再返回可调度
-        // tracing::info!("case 5");
         return SchedulabilityResult {
             ac: AdmissionControl::SCHEDULABLE,
             worker_id: Some(worker_id),
@@ -371,10 +409,16 @@ impl Runtime {
         };
     }
 
+    /**
+     * 通过id获取任务状态
+     */
     pub fn get_status_by_id(&self, id: u64) -> Option<SchedulerStatus> {
         self.scheduler.get_status_by_id(id)
     }
 
+    /**
+     * 获取所有正在执行或就绪任务的状态
+     */
     pub fn get_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
         let mut status = BTreeMap::new();
         for id in 0..self.threads.len() {
@@ -385,13 +429,9 @@ impl Runtime {
         Some(status)
     }
 
-    // pub fn print_completed_status(&self) {
-    //     let s = self.scheduler.get_completed_status().unwrap();
-    //     s.iter().for_each(|(id, stat)| {
-    //         tracing::info!("id: {}, status: \n{}", id, stat);
-    //     });
-    // }
-
+    /**
+     * 获取已完成任务的状态
+     */
     pub fn get_completed_status(&self) -> Option<BTreeMap<u64, SchedulerStatus>> {
         self.scheduler.get_completed_status()
     }
@@ -413,6 +453,7 @@ pub enum AdmissionControl {
     UNSCHEDULABLE,
 }
 
+/// 准入控制的结果
 pub struct SchedulabilityResult {
     ac: AdmissionControl,
     worker_id: Option<u8>,
