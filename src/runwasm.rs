@@ -5,6 +5,7 @@ use crate::{
     task::SchedulerStatus,
 };
 use anyhow::Error;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -19,10 +20,8 @@ thread_local! {
     static NAME_ID: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
 }
 
-lazy_static::lazy_static! {
-    static ref TEST_QUEUE: Arc<Mutex<VecDeque<Tester>>> = Arc::new(Mutex::new(VecDeque::new()));
-    // pub static ref MODEL: Arc<ort::Session> = infer::detect::prepare_model();
-}
+static TEST_QUEUE: Lazy<Mutex<VecDeque<Tester>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+// pub static ref MODEL: Arc<ort::Session> = infer::detect::prepare_model();
 
 pub fn set_test_env(tester: Tester) {
     if let Ok(queue) = TEST_QUEUE.lock().as_mut() {

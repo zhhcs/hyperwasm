@@ -4,6 +4,7 @@ use crate::{
     StackSize,
 };
 use anyhow::Error;
+use once_cell::sync::Lazy;
 use std::{
     collections::{BTreeMap, BinaryHeap, HashMap},
     panic::{self, AssertUnwindSafe},
@@ -11,9 +12,8 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
-lazy_static::lazy_static! {
-    static ref AVA_TIME: Arc<Mutex<HashMap<u64, f64>>> = Arc::new(Mutex::new(HashMap::new()));
-}
+
+static _AVA_TIME: Lazy<Mutex<HashMap<u64, f64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Runtime就是Runtime
 pub struct Runtime {

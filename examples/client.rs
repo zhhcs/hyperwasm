@@ -5,7 +5,7 @@ use hyper_scheduler::{
 
 // cargo build --release --package hyper-scheduler --example client
 // sudo ./target/release/examples/client
-#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 15)]
 async fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing::Level::INFO)

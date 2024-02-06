@@ -16,7 +16,7 @@ use axum::{
     Json, Router,
 };
 use crossbeam::queue::ArrayQueue;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -60,14 +60,13 @@ fn runtime() -> &'static Runtime {
     RUNTIME.get().unwrap()
 }
 
-lazy_static::lazy_static! {
-    /// 用于存放编译后的wasm环境
-    static ref ENV_MAP: Arc<RwLock<HashMap<String, Environment>>> = Arc::new(RwLock::new(HashMap::new()));
-    /// 函数调用的请求队列
-    static ref REQUEST_QUEUE: ArrayQueue<SchedRequest> = ArrayQueue::new(10000);
-    /// 执行的延迟统计，不含响应时间
-    pub static ref LATENCY: Arc<Mutex<HashMap<i32, i32>>> = Arc::new(Mutex::new(HashMap::new()));
-}
+/// 用于存放编译后的wasm环境
+static ENV_MAP: Lazy<RwLock<HashMap<String, Environment>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+/// 函数调用的请求队列
+static REQUEST_QUEUE: Lazy<ArrayQueue<SchedRequest>> = Lazy::new(|| ArrayQueue::new(10000));
+/// 执行的延迟统计，不含响应时间
+pub static LATENCY: Lazy<Mutex<HashMap<i32, i32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 // 一些计数
 /// 准入计数
