@@ -109,7 +109,7 @@ impl LocalTimer {
 }
 
 pub struct Scheduler {
-    workers: u8,
+    worker_threads: u8,
     ava_time: HashMap<u8, RwLock<HashMap<u64, f64>>>, // 任务结束后及时删除
     slots: HashMap<u8, RwLock<Option<Box<Coroutine>>>>,
     realtime_queue: HashMap<u8, Mutex<BinaryHeap<Box<Coroutine>>>>,
@@ -141,7 +141,7 @@ impl Scheduler {
             curr_running_id.insert(i, AtomicU64::new(0));
         }
         Arc::new(Scheduler {
-            workers: worker_threads,
+            worker_threads,
             ava_time,
             slots,
             realtime_queue,
@@ -156,11 +156,11 @@ impl Scheduler {
     }
 
     pub fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
-        Self::create_cg();
+        Self::create_cg(self.worker_threads);
         let scheduler = self.clone();
         init_start();
         let mut v = Vec::new();
-        for i in 0..self.workers {
+        for i in 0..self.worker_threads {
             let scheduler = scheduler.clone();
             let t = thread::spawn(move || {
                 let pthreadtid = nix::sys::pthread::pthread_self();
@@ -176,7 +176,7 @@ impl Scheduler {
                     libc::sigaction(libc::SIGURG, &sa, std::ptr::null_mut());
                 }
 
-                let w = Worker::new(&scheduler, 16, i);
+                let w = Worker::new(&scheduler, 256, i);
                 let tid = gettid();
                 w.set_cgroup(tid);
                 w.init();
@@ -192,7 +192,7 @@ impl Scheduler {
         v
     }
 
-    fn create_cg() {
+    fn create_cg(worker_threads: u8) {
         let hypersched = cgroupv2::Controllerv2::new(
             std::path::PathBuf::from("/sys/fs/cgroup"),
             String::from("hypersched"),
@@ -204,7 +204,7 @@ impl Scheduler {
             ],
             None,
         );
-        hypersched.set_cpuset(0, Some(3));
+        hypersched.set_cpuset(0, Some(worker_threads + 1));
         hypersched.set_cgroup_procs(nix::unistd::gettid());
 
         let cg_main = cgroupv2::Controllerv2::new(

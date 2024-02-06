@@ -16,6 +16,6 @@ fn main() {
         .build()
         .unwrap();
     rt.block_on(async {
-        Server::start(2).await;
+        Server::start(4).await;
     });
 }

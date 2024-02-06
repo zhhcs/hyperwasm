@@ -15,7 +15,6 @@ use std::{
 };
 use wasmtime::{Engine, Linker, Module, Store};
 use wasmtime_wasi::{sync::WasiCtxBuilder, WasiCtx};
-
 thread_local! {
     static NAME_ID: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
 }

@@ -17,7 +17,7 @@ async fn main() {
 
     for i in 0..1000 {
         let client = Client::new();
-        let (num, t1, t2) = if i % 1000 == 1000 {
+        let (num, t1, t2) = if i % 2 == 0 {
             (30, 5, 100)
         } else {
             (27, 2, 20)
@@ -63,7 +63,7 @@ async fn main() {
 }
 
 async fn req(client: Client, mut cfg1: CallConfigRequest) {
-    for i in 0..1000 {
+    for i in 0..2000 {
         cfg1.task_unique_name.push_str(&format!("_{}", i));
         let _ = client.call(&cfg1).await;
     }

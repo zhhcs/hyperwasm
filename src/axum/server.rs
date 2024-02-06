@@ -146,6 +146,7 @@ pub struct Server {}
 impl Server {
     /**
      * 启动Server,HyperWasm的入口
+     * 这里配置工作核心的数量
      */
     pub async fn start(worker_threads: u8) {
         // 初始化runtime
