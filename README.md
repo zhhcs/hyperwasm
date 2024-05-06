@@ -2,7 +2,6 @@
 multi_thread
 
 
-
 # hyper-sched
 仅在Ubuntu 22.04环境下运行，需要root权限
 ```
@@ -50,33 +49,3 @@ curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_fun
 
      sudo systemctl daemon-reload
 ```
-
-# fix
-FIXME: 不支持生成子任务
-
-
-1. 单独的调度线程？
-2. 生成和运行的状态同步：广播、信箱
-
-
-# new
-1. 在register之后生成一些测试任务，测一下任务的`实际执行时长`，记录到这个wasm环境的配置中，并把这个时间返回给客户端。
-     要求：1). 测试不要阻塞监听核心。
-          2). 多测试几次，取得稳定的结果。
-          3). 测试要在专门的测试线程，不需要封装成micro process，不要经过全局调度器，不要占用工作线程。
-          4). 可能需要修改现有的结构体，但不要影响已有的功能。
-
-     流程：1). request(register) -> benchmark -> response(register status,expected_execution_time) 
-          2). request(call, relative_deadline) -> expected_execution_time < relative_deadline? -> ... -> response
-
-
-
-
-          1. 冷热启动
-               
-                    
-
-          2. 智能交通
-
-
-          3. 吞吐量并发量     
