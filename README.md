@@ -49,3 +49,6 @@ curl -H "Content-Type: application/json" -d '{"wasm_name":"fib.wasm","export_fun
 
      sudo systemctl daemon-reload
 ```
+
+# Inspiration
+[stuck](https://github.com/kezhuw/stuck): Multi-threading task facility building on cooperative stackful coroutine.
