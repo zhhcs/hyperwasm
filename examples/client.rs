@@ -34,7 +34,6 @@ async fn main() {
             results_length: "1".to_owned(),
             expected_execution_time: t1.to_string(),
             expected_deadline: t2.to_string(),
-            //expected_deadline: rng.gen_range(2100..20000).to_string(),
         };
 
         cfgs.push((client, call_config));

@@ -52,7 +52,10 @@ async fn main() {
 
     // 部署服务
     let client = Client::new(local_ip, port);
-    let config = RegisterConfig::new("/home/ubuntu/dev/hyperwasm/examples/fib.wasm", "fib.wasm");
+    let config = RegisterConfig::new(
+        "/home/user/lmxia/hyperwasm-multi_thread/hyper-scheduler/fib.wasm",
+        "fib.wasm",
+    );
     let _ = client.init(&config).await;
 
     // 函数调用

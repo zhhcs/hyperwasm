@@ -33,7 +33,7 @@ async fn main() {
 
     // 部署服务
     let config = RegisterConfig::new(
-        "/home/zhanghao/dev/hyper-scheduler/examples/fib.wasm",
+        "/home/user/lmxia/hyperwasm-multi_thread/hyper-scheduler/fib.wasm",
         "fib.wasm",
     );
     let _ = client.init(&config).await;
