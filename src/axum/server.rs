@@ -389,8 +389,8 @@ impl Server {
         let start_latency = unsafe { WARM_START_TIME } / cnt;
         let sched_latency = unsafe { SCHED_TIME } / cnt;
         format!(
-            "cnt: {}, start_latency: {:?}, cnt27: {}, cnt30: {}, sched_latency: {:?}",
-            cnt, start_latency, cnt27, cnt30, sched_latency
+            "cnt: {}, start_latency: {:?},  sched_latency: {:?}",
+            cnt, start_latency, sched_latency
         )
     }
 
