@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use clap::Parser;
 use hyper_scheduler::{
-    axum::{client::Client, CallConfigRequest},
+    axum::{client::Client, CallConfigRequest, ClientArgs},
     runwasm::RegisterConfig,
 };
 use tokio::time::sleep;
@@ -13,7 +14,10 @@ async fn main() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
-    let client = Client::new();
+    let args = ClientArgs::parse();
+    let local_ip = &args.local_ip;
+    let port = args.port;
+    let client = Client::new(local_ip, port);
     let config = RegisterConfig::new(
         "/home/zhanghao/dev/hyper-scheduler/examples/fib.wasm",
         "fib.wasm",
@@ -23,7 +27,7 @@ async fn main() {
     sleep(Duration::from_millis(100)).await;
     let mut cfgs = Vec::new();
 
-    let client1 = Client::new();
+    let client1 = Client::new(local_ip, port);
     let scc1 = CallConfigRequest {
         wasm_name: "fib.wasm".to_owned(),
         task_unique_name: "scc1".to_owned(),
@@ -36,7 +40,7 @@ async fn main() {
     };
     cfgs.push((client1, scc1));
 
-    let client2 = Client::new();
+    let client2 = Client::new(local_ip, port);
     let scc2 = CallConfigRequest {
         wasm_name: "fib.wasm".to_owned(),
         task_unique_name: "scc2".to_owned(),
@@ -49,7 +53,7 @@ async fn main() {
     };
     cfgs.push((client2, scc2));
 
-    let client3 = Client::new();
+    let client3 = Client::new(local_ip, port);
     let scc3 = CallConfigRequest {
         wasm_name: "fib.wasm".to_owned(),
         task_unique_name: "scc3".to_owned(),
@@ -62,7 +66,7 @@ async fn main() {
     };
     cfgs.push((client3, scc3));
 
-    let client4 = Client::new();
+    let client4 = Client::new(local_ip, port);
     let scc4 = CallConfigRequest {
         wasm_name: "fib.wasm".to_owned(),
         task_unique_name: "scc3".to_owned(),
@@ -87,7 +91,7 @@ async fn main() {
         let _ = task.await;
     }
 
-    let client = Client::new();
+    let client = Client::new(local_ip, port);
     let _ = client.get_latency().await;
     let _ = client.get_status_by_name("scc1").await;
     let _ = client.get_status_by_name("scc2").await;

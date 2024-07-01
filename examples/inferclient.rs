@@ -1,5 +1,6 @@
+use clap::Parser;
 use hyper_scheduler::{
-    axum::{client::Client, CallConfigRequest},
+    axum::{client::Client, CallConfigRequest, ClientArgs},
     runwasm::RegisterConfig,
 };
 
@@ -13,7 +14,10 @@ async fn main() {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     tracing::info!("Starting");
 
-    let client = Client::new();
+    let args = ClientArgs::parse();
+    let local_ip = &args.local_ip;
+    let port = args.port;
+    let client = Client::new(local_ip, port);
     let mut config = RegisterConfig::new(
         "/home/zhanghao/dev/hyper-scheduler/examples/detect.wasm",
         "detect.wasm",
