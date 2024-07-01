@@ -378,8 +378,8 @@ impl Server {
 
         // 获取一些计数信息
         let cnt = CNT.load(std::sync::atomic::Ordering::Relaxed);
-        let cnt27 = CNT_27.load(std::sync::atomic::Ordering::Relaxed);
-        let cnt30 = CNT_30.load(std::sync::atomic::Ordering::Relaxed);
+        // let cnt27 = CNT_27.load(std::sync::atomic::Ordering::Relaxed);
+        // let cnt30 = CNT_30.load(std::sync::atomic::Ordering::Relaxed);
 
         // 没有计数就算了
         if cnt == 0 {
