@@ -393,7 +393,8 @@ pub fn call_func(
     mut conf: FuncConfig,
     func_result: &Arc<FuncResult>,
 ) -> Result<u64, Error> {
-    if conf.relative_deadline <= conf.expected_execution_time {
+    if conf.relative_deadline == 0 || conf.expected_execution_time == 0 {
+    } else if conf.relative_deadline <= conf.expected_execution_time {
         return Err(wasmtime::Error::msg("Invalid_deadline").context("Invalid_deadline"));
     }
     if conf.task_unique_name.eq("anon") {
@@ -402,25 +403,20 @@ pub fn call_func(
     if NAME_ID.with(|map| map.borrow().contains_key(conf.task_unique_name.as_str())) {
         return Err(wasmtime::Error::msg("Invalid_unique_name").context("Invalid_unique_name"));
     }
-    // FIXME:
-    // 疑似内存泄漏
-    //
-    // 1.创建SchedulerStatus
-    // 2.进行可调度性分析
-    // 3.准入再生成microprocess
-    //
-    // Fixed 2023/12/26 21:30
 
-    // TODO:
-    // 似乎有什么东西导致超时了
-    // 暂时不知道怎么搞
-    // 可以把预期执行时长写久一点
-    // 2024/02/05 无法复现
-
-    let expected_execution_time = Some(std::time::Duration::from_millis(
-        conf.expected_execution_time,
-    ));
-    let relative_deadline = Some(std::time::Duration::from_millis(conf.relative_deadline));
+    let expected_execution_time =
+        if conf.relative_deadline == 0 || conf.expected_execution_time == 0 {
+            None
+        } else {
+            Some(std::time::Duration::from_millis(
+                conf.expected_execution_time,
+            ))
+        };
+    let relative_deadline = if conf.relative_deadline == 0 || conf.expected_execution_time == 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_millis(conf.relative_deadline))
+    };
 
     let res = rt.admission_control_result(expected_execution_time, relative_deadline);
 

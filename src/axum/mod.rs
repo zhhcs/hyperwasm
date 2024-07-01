@@ -1,11 +1,32 @@
 use serde::{Deserialize, Serialize};
 pub mod client;
 pub mod server;
+use clap::Parser;
 
-const PORT: u16 = 3001;
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct ServerArgs {
+    #[arg(short, long)]
+    pub port: u16,
 
-fn get_port() -> u16 {
-    PORT
+    #[arg(short, long, default_value_t = 1)]
+    pub workers: u8,
+
+    #[arg(short, long, default_value_t = 0)]
+    pub start_cpu: u8,
+
+    #[arg(short, long, default_value_t = 0_000)]
+    pub timer_us: u64,
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct ClientArgs {
+    #[arg(short, long)]
+    pub local_ip: String,
+
+    #[arg(short, long)]
+    pub port: u16,
 }
 
 #[derive(Serialize, Deserialize)]

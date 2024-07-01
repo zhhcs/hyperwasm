@@ -67,11 +67,11 @@ impl Worker {
 
     pub fn set_cgroup(&self, tid: Pid) {
         let cg_worker = crate::cgroupv2::Controllerv2::new(
-            std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+            std::path::PathBuf::from("/sys/fs/cgroup/hyperwasm"),
             format!("worker{}", tid),
         );
         cg_worker.set_threaded();
-        cg_worker.set_cpuset(self.worker_id + 2, None);
+        cg_worker.set_cpuset(self.scheduler.start_cpu + self.worker_id + 2, None);
         cg_worker.set_cgroup_threads(tid);
     }
 

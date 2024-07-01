@@ -2,7 +2,6 @@ use super::{
     CallConfigRequest, CallFuncResponse, CallWithName, RegisterResponse, StatusQuery, TestRequest,
 };
 use crate::{
-    axum::get_port,
     result::{FuncResult, ResultFuture},
     runtime::Runtime,
     runwasm::{
@@ -31,6 +30,8 @@ thread_local! {
     static START: Cell<Option<Instant>> = Cell::new(None);
     /// 吞吐量统计 (时间戳，请求数量，准入数量)
     static THROUGHPUT: RefCell<Vec<(std::time::Duration,u32,u32)>> = RefCell::new(Vec::new());
+    /// port
+    static PORT: Cell<Option<u16>> = Cell::new(None);
 }
 
 /**
@@ -49,6 +50,18 @@ pub fn init_start() {
  */
 pub fn get_start() -> Instant {
     START.with(|cell| cell.get()).expect("no start")
+}
+
+fn set_port(port: u16) {
+    PORT.with(|cell| {
+        if cell.get().is_none() {
+            cell.set(Some(port));
+        }
+    });
+}
+
+fn get_port() -> u16 {
+    PORT.with(|cell| cell.get()).expect("no port")
 }
 
 // 单例模式
@@ -93,14 +106,14 @@ struct SchedRequest {
 /**
  * 创建全局调度器线程
  */
-pub fn spawn_scheduler() -> JoinHandle<()> {
-    tokio::task::spawn_blocking(|| {
+pub fn spawn_scheduler(cpuset: u8) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
         let cg_scheduler = crate::cgroupv2::Controllerv2::new(
-            std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+            std::path::PathBuf::from("/sys/fs/cgroup/hyperwasm"),
             String::from("scheduler"),
         );
         cg_scheduler.set_threaded();
-        cg_scheduler.set_cpuset(1, None);
+        cg_scheduler.set_cpuset(cpuset, None);
         cg_scheduler.set_cgroup_threads(nix::unistd::gettid());
         loop {
             while let Some(sched) = REQUEST_QUEUE.pop() {
@@ -146,14 +159,24 @@ impl Server {
     /**
      * 启动Server,HyperWasm的入口
      * 这里配置工作核心的数量
+     * litener: start_cpu
+     * scheduler: start_cpu + 1
+     * workers: start_cpu + 2 ~ start_cpu + 1 + worker_threads
+     * tester: start_cpu + 2 + worker_threads
      */
-    pub async fn start(worker_threads: u8) {
+    pub async fn start(port: u16, worker_threads: u8, start_cpu: u8, timer_exp: u64) {
+        set_port(port);
         // 初始化runtime
-        let _ = RUNTIME.set(Runtime::new(Some(worker_threads)));
+        let _ = RUNTIME.set(Runtime::new(
+            Some(worker_threads),
+            Some(start_cpu),
+            Some(timer_exp),
+        ));
         // 创建全局调度器线程
-        let sched = spawn_scheduler();
+        let sched = spawn_scheduler(start_cpu + 1);
         // crate::runwasm::MODEL.as_ref();
-
+        // 测试用线程，实验室联调用
+        let handle = spawn_tester(start_cpu + 2 + worker_threads);
         // 在这里添加路由
         let app = Router::new()
             .route("/register", post(Self::register))
@@ -165,11 +188,8 @@ impl Server {
             .route("/uname", get(Self::get_status_by_name))
             .route("/warm-start-latency", get(Self::get_warm_start_latency));
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], get_port()));
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
         tracing::info!("listening on {}", addr);
-
-        // 测试用线程，实验室联调用
-        // let handle = spawn_tester();
 
         // 启动服务器
         axum::Server::bind(&addr)
@@ -179,7 +199,7 @@ impl Server {
         // 全局调度器线程在这里阻塞
         sched.await.unwrap();
         // 测试线程在这里阻塞
-        // handle.await.unwrap();
+        handle.await.unwrap();
     }
 
     /**
@@ -219,7 +239,7 @@ impl Server {
             }
             // 部署成功
             reponse.status = "Success".to_owned();
-            reponse.url = format!("http://127.0.0.1:{}/call", get_port());
+            reponse.url = format!("http://0.0.0.0:{}/call", get_port()); //本机IP
             return Json(reponse);
         }
         Json(reponse)
@@ -404,7 +424,7 @@ impl Server {
                 if let Ok(map) = ENV_MAP.write().as_mut() {
                     map.insert((&env.get_wasm_name()).to_string(), env);
                     reponse.status = "Success".to_owned();
-                    reponse.url = format!("http://127.0.0.1:{}/call", get_port());
+                    reponse.url = format!("http://0.0.0.0:{}/call", get_port());
                     return Json(reponse);
                 }
             };
@@ -580,17 +600,17 @@ impl Server {
  * 创建测试用线程
  * 实验室联调用
  */
-pub fn spawn_tester() -> JoinHandle<()> {
-    tokio::task::spawn_blocking(|| {
+pub fn spawn_tester(cpuset: u8) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
         let cg_tester = crate::cgroupv2::Controllerv2::new(
-            std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+            std::path::PathBuf::from("/sys/fs/cgroup/hyperwasm"),
             String::from("tester"),
         );
         cg_tester.set_threaded();
-        cg_tester.set_cpuset(0, None);
+        cg_tester.set_cpuset(cpuset, None);
         cg_tester.set_cgroup_threads(nix::unistd::gettid());
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            // std::thread::sleep(std::time::Duration::from_millis(1));
             if let Some(tester) = get_test_env() {
                 match call_func_sync(tester.env) {
                     Ok(time) => {

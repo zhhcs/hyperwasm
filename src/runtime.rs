@@ -23,22 +23,29 @@ pub struct Runtime {
 
 impl Default for Runtime {
     /**
-     * 默认单线程
+     * 默认单线程,无定时器
      */
     fn default() -> Self {
-        let scheduler = Scheduler::new(1);
-        let threads = Scheduler::start(&scheduler);
+        let scheduler = Scheduler::new(1, 0);
+        let threads = Scheduler::start(&scheduler, 0);
         Self { scheduler, threads }
     }
 }
 
 impl Runtime {
     /**
-     * 需要指定线程数量
+     * 需要指定线程数量和定时器周期（微秒）
      */
-    pub fn new(worker_threads: Option<u8>) -> Runtime {
-        let scheduler = Scheduler::new(worker_threads.unwrap_or_default());
-        let threads = Scheduler::start(&scheduler);
+    pub fn new(
+        worker_threads: Option<u8>,
+        start_cpu: Option<u8>,
+        timer_exp: Option<u64>,
+    ) -> Runtime {
+        let scheduler = Scheduler::new(
+            worker_threads.unwrap_or_default(),
+            start_cpu.unwrap_or_default(),
+        );
+        let threads = Scheduler::start(&scheduler, timer_exp.unwrap_or_default());
         Runtime { scheduler, threads }
     }
 
@@ -85,7 +92,7 @@ impl Runtime {
         });
         // 获取准入控制结果
         let ac = schedulability_result.get_ac();
-        // 获取调度的目标线程
+        // 获取调度的目标工作核心
         let worker_id = schedulability_result.worker_id.unwrap_or_default();
         // 这个状态用于实例化
         let status = schedulability_result.costatus;
@@ -96,7 +103,7 @@ impl Runtime {
                 let id = co.get_co_id();
                 // 这里的worker_id没用
                 if let Ok(()) = self.scheduler.push(co, false, worker_id) {
-                    // 直接丢到全局队列
+                    // 直接丢到全局非实时microprocess队列
                     return Ok(id);
                 } else {
                     tracing::error!("spawn failed");
@@ -109,7 +116,7 @@ impl Runtime {
                 let stat = co.get_schedulestatus();
                 // 先更新状态
                 self.scheduler.update_status(id, stat, worker_id);
-                // 放到对应线程的slot
+                // 放到对应工作核心的slot
                 self.scheduler.set_slots(worker_id, co);
 
                 // 发信号通知抢占
@@ -134,7 +141,7 @@ impl Runtime {
                 let co = Coroutine::from_status(func, status.unwrap());
                 let stat = co.get_schedulestatus();
                 let id = co.get_co_id();
-                // 放到目标线程的实时队列排队
+                // 放到目标工作核心的实时队列排队
                 if let Ok(()) = self.scheduler.push(co, true, worker_id) {
                     self.scheduler.update_status(id, stat, worker_id);
                     return Ok(id);

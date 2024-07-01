@@ -110,6 +110,7 @@ impl LocalTimer {
 
 pub struct Scheduler {
     worker_threads: u8,
+    start_cpu: u8,
     ava_time: HashMap<u8, RwLock<HashMap<u64, f64>>>, // 任务结束后及时删除
     slots: HashMap<u8, RwLock<Option<Box<Coroutine>>>>,
     realtime_queue: HashMap<u8, Mutex<BinaryHeap<Box<Coroutine>>>>,
@@ -124,7 +125,7 @@ unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
 impl Scheduler {
-    pub fn new(mut worker_threads: u8) -> Arc<Scheduler> {
+    pub fn new(mut worker_threads: u8, start_cpu: u8) -> Arc<Scheduler> {
         if worker_threads == 0 {
             worker_threads = 1;
         }
@@ -142,6 +143,7 @@ impl Scheduler {
         }
         Arc::new(Scheduler {
             worker_threads,
+            start_cpu,
             ava_time,
             slots,
             realtime_queue,
@@ -155,8 +157,8 @@ impl Scheduler {
         })
     }
 
-    pub fn start(self: &Arc<Scheduler>) -> Vec<JoinHandle<()>> {
-        Self::create_cg(self.worker_threads);
+    pub fn start(self: &Arc<Scheduler>, timer_exp: u64) -> Vec<JoinHandle<()>> {
+        self.create_cg(self.worker_threads);
         let scheduler = self.clone();
         init_start();
         let mut v = Vec::new();
@@ -183,7 +185,7 @@ impl Scheduler {
                 let w = unsafe { get_worker().as_mut() };
 
                 // 设置线程定时器
-                let timer = LocalTimer::new(tid.into(), 00_000_000, SIG, 3);
+                let timer = LocalTimer::new(tid.into(), timer_exp * 1000, SIG, 3);
                 timer.init();
                 w.run();
             });
@@ -192,27 +194,27 @@ impl Scheduler {
         v
     }
 
-    fn create_cg(worker_threads: u8) {
-        let hypersched = cgroupv2::Controllerv2::new(
+    fn create_cg(&self, worker_threads: u8) {
+        let hyperwasm = cgroupv2::Controllerv2::new(
             std::path::PathBuf::from("/sys/fs/cgroup"),
-            String::from("hypersched"),
+            String::from("hyperwasm"),
         );
-        hypersched.set_sub_controller(
+        hyperwasm.set_sub_controller(
             vec![
                 cgroupv2::ControllerType::CPU,
                 cgroupv2::ControllerType::CPUSET,
             ],
             None,
         );
-        hypersched.set_cpuset(0, Some(worker_threads + 1));
-        hypersched.set_cgroup_procs(nix::unistd::gettid());
+        hyperwasm.set_cpuset(self.start_cpu, Some(self.start_cpu + worker_threads + 2));
+        hyperwasm.set_cgroup_procs(nix::unistd::gettid());
 
         let cg_main = cgroupv2::Controllerv2::new(
-            std::path::PathBuf::from("/sys/fs/cgroup/hypersched"),
+            std::path::PathBuf::from("/sys/fs/cgroup/hyperwasm"),
             String::from("main"),
         );
         cg_main.set_threaded();
-        cg_main.set_cpuset(0, None);
+        cg_main.set_cpuset(self.start_cpu, None);
         cg_main.set_cgroup_threads(nix::unistd::gettid());
     }
 
