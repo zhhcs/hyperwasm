@@ -369,12 +369,12 @@ impl Server {
             })
         });
         // 所有任务的延迟分布
-        let mut latency_res = String::new();
-        if let Ok(latency) = LATENCY.lock() {
-            latency.iter().for_each(|(time, cnt)| {
-                latency_res.push_str(&format!("\nlatency: {}, cnt: {}", time, cnt));
-            });
-        }
+        // let mut latency_res = String::new();
+        // if let Ok(latency) = LATENCY.lock() {
+        //     latency.iter().for_each(|(time, cnt)| {
+        //         latency_res.push_str(&format!("\nlatency: {}, cnt: {}", time, cnt));
+        //     });
+        // }
 
         // 获取一些计数信息
         let cnt = CNT.load(std::sync::atomic::Ordering::Relaxed);
@@ -389,8 +389,8 @@ impl Server {
         let start_latency = unsafe { WARM_START_TIME } / cnt;
         let sched_latency = unsafe { SCHED_TIME } / cnt;
         format!(
-            "cnt: {}, start_latency: {:?}, cnt27: {}, cnt30: {}, sched_latency: {:?},\nlatency: {}",
-            cnt, start_latency, cnt27, cnt30, sched_latency, latency_res
+            "cnt: {}, start_latency: {:?}, cnt27: {}, cnt30: {}, sched_latency: {:?}",
+            cnt, start_latency, cnt27, cnt30, sched_latency
         )
     }
 
